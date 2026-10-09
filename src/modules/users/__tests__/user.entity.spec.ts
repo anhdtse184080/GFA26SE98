@@ -25,3 +25,14 @@ describe('User.activate', () => {
     expect(u.activatedAt).toBeNull();
   });
 });
+
+describe('User.changePassword', () => {
+  it('thay password_hash, không đổi trạng thái', () => {
+    const u = Object.assign(user('ACTIVE'), { passwordHash: 'cu' });
+
+    u.changePassword('moi');
+
+    expect(u.passwordHash).toBe('moi');
+    expect(u.status).toBe('ACTIVE');
+  });
+});

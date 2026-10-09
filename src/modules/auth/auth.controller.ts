@@ -12,9 +12,11 @@ import type { AuthUser } from '../../common/auth/auth-user.js';
 import { CurrentUser, Public } from '../../common/auth/decorators.js';
 import { AuthService } from './auth.service.js';
 import {
+  ForgotPasswordDto,
   LoginDto,
   RegisterDto,
   ResendOtpDto,
+  ResetPasswordDto,
   VerifyEmailDto,
 } from './dto/auth.dto.js';
 import {
@@ -80,6 +82,31 @@ export class AuthController {
       dto.password,
     );
     return { accessToken, user: UserResponseDto.from(user) };
+  }
+
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  async forgotPassword(
+    @Body() dto: ForgotPasswordDto,
+  ): Promise<MessageResponseDto> {
+    await this.auth.requestPasswordReset(dto.email);
+    return {
+      message:
+        'Nếu email thuộc một tài khoản đang hoạt động, mã OTP đặt lại mật khẩu đã được gửi tới email đó',
+    };
+  }
+
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+  ): Promise<MessageResponseDto> {
+    await this.auth.resetPassword(dto.email, dto.otp, dto.newPassword);
+    return { message: 'Đặt lại mật khẩu thành công, vui lòng đăng nhập lại' };
   }
 
   @Get('me')

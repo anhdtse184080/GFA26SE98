@@ -1,3 +1,4 @@
+import { applyDecorators } from '@nestjs/common';
 import { Transform } from 'class-transformer';
 import {
   IsEmail,
@@ -17,6 +18,19 @@ const normalizeEmail = ({ value }: { value: unknown }) =>
 
 /** Ít nhất một chữ cái (kể cả có dấu) và một chữ số. */
 const PASSWORD_PATTERN = /^(?=.*\p{L})(?=.*\d).+$/u;
+
+/**
+ * Quy tắc mật khẩu dùng chung cho đăng ký và đặt lại mật khẩu.
+ * bcrypt chỉ dùng 72 byte đầu nên giới hạn độ dài.
+ */
+function IsNewPassword(field: string): PropertyDecorator {
+  return applyDecorators(
+    IsString(),
+    MinLength(8, { message: `${field} phải có ít nhất 8 ký tự` }),
+    MaxLength(72),
+    Matches(PASSWORD_PATTERN, { message: `${field} phải có cả chữ và số` }),
+  );
+}
 
 class EmailDto {
   @Transform(normalizeEmail)
@@ -39,21 +53,26 @@ export class RegisterDto extends EmailDto {
   })
   phone?: string;
 
-  /** bcrypt chỉ dùng 72 byte đầu nên giới hạn độ dài. */
-  @IsString()
-  @MinLength(8, { message: 'password phải có ít nhất 8 ký tự' })
-  @MaxLength(72)
-  @Matches(PASSWORD_PATTERN, { message: 'password phải có cả chữ và số' })
+  @IsNewPassword('password')
   password: string;
 }
 
-export class VerifyEmailDto extends EmailDto {
+class OtpDto extends EmailDto {
   @IsString()
   @Matches(/^\d{6}$/, { message: 'otp phải gồm 6 chữ số' })
   otp: string;
 }
 
+export class VerifyEmailDto extends OtpDto {}
+
 export class ResendOtpDto extends EmailDto {}
+
+export class ForgotPasswordDto extends EmailDto {}
+
+export class ResetPasswordDto extends OtpDto {
+  @IsNewPassword('newPassword')
+  newPassword: string;
+}
 
 export class LoginDto extends EmailDto {
   @IsString()

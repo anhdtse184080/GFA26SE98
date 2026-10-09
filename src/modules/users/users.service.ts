@@ -70,4 +70,9 @@ export class UsersService {
     user.recordLogin(this.clock.now());
     return this.users.save(user);
   }
+
+  async changePassword(user: User, passwordHash: string): Promise<User> {
+    user.changePassword(passwordHash);
+    return this.users.save(user);
+  }
 }

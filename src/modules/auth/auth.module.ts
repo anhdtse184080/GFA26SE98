@@ -16,6 +16,10 @@ import { JWT_SECRET, JwtStrategy } from './jwt.strategy.js';
 import { deriveOtpHashKey } from './otp-code.js';
 import { OTP_CONFIG, type OtpConfig } from './otp.config.js';
 import { OtpService } from './otp.service.js';
+import {
+  derivePasswordFingerprintKey,
+  PASSWORD_FINGERPRINT_KEY,
+} from './password-fingerprint.js';
 import { OTP_REPOSITORY } from './repositories/otp.repository.js';
 import { TypeOrmOtpRepository } from './repositories/typeorm-otp.repository.js';
 
@@ -71,6 +75,12 @@ const MS_PER_SECOND = 1_000;
         }),
         hashKey: deriveOtpHashKey(config.get('JWT_SECRET', { infer: true })),
       }),
+    },
+    {
+      provide: PASSWORD_FINGERPRINT_KEY,
+      inject: [ConfigService],
+      useFactory: (config: Config) =>
+        derivePasswordFingerprintKey(config.get('JWT_SECRET', { infer: true })),
     },
     {
       provide: JWT_SECRET,

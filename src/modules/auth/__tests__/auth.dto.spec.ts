@@ -1,6 +1,11 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import { LoginDto, RegisterDto } from '../dto/auth.dto.js';
+import {
+  ForgotPasswordDto,
+  LoginDto,
+  RegisterDto,
+  ResetPasswordDto,
+} from '../dto/auth.dto.js';
 
 function validateRegister(body: Record<string, unknown>) {
   const dto = plainToInstance(RegisterDto, body);
@@ -62,5 +67,65 @@ describe('LoginDto', () => {
   it('chuẩn hóa email', () => {
     const dto = plainToInstance(LoginDto, { email: ' A@B.COM', password: 'x' });
     expect(dto.email).toBe('a@b.com');
+  });
+});
+
+describe('ForgotPasswordDto', () => {
+  it('chuẩn hóa email; email sai → lỗi email', () => {
+    const dto = plainToInstance(ForgotPasswordDto, {
+      email: ' Khach@Example.COM ',
+    });
+    expect(validateSync(dto)).toEqual([]);
+    expect(dto.email).toBe('khach@example.com');
+
+    const bad = plainToInstance(ForgotPasswordDto, { email: 'khong-phai' });
+    expect(validateSync(bad).map((e) => e.property)).toEqual(['email']);
+  });
+});
+
+describe('ResetPasswordDto', () => {
+  const validReset = {
+    email: ' Khach@Example.COM ',
+    otp: '012345',
+    newPassword: 'matkhaumoi1',
+  };
+
+  function validateReset(body: Record<string, unknown>) {
+    const dto = plainToInstance(ResetPasswordDto, body);
+    const errors = validateSync(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
+    return { dto, fields: errors.map((e) => e.property) };
+  }
+
+  it('hợp lệ, email chuẩn hóa', () => {
+    const { dto, fields } = validateReset(validReset);
+
+    expect(fields).toEqual([]);
+    expect(dto.email).toBe('khach@example.com');
+  });
+
+  it.each([
+    ['ngắn hơn 8 ký tự', 'abc1234'],
+    ['chỉ có chữ', 'matkhauxyz'],
+    ['chỉ có số', '12345678'],
+    ['dài hơn 72 ký tự', `a1${'x'.repeat(71)}`],
+  ])('newPassword %s → lỗi newPassword (cùng quy tắc đăng ký)', (_c, pw) => {
+    expect(validateReset({ ...validReset, newPassword: pw }).fields).toEqual([
+      'newPassword',
+    ]);
+  });
+
+  it.each(['12345', '1234567', '12a456', 123456])(
+    'otp %s sai định dạng → lỗi otp',
+    (otp) => {
+      expect(validateReset({ ...validReset, otp }).fields).toEqual(['otp']);
+    },
+  );
+
+  it('thiếu newPassword → lỗi newPassword', () => {
+    const { newPassword: _n, ...rest } = validReset;
+    expect(validateReset(rest).fields).toEqual(['newPassword']);
   });
 });

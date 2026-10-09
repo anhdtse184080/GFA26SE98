@@ -1,4 +1,5 @@
 import { JwtService } from '@nestjs/jwt';
+import type { JwtPayload } from '../../../common/auth/auth-user.js';
 import {
   BusinessRuleError,
   ConflictError,
@@ -15,6 +16,8 @@ import {
 } from '../../../../test/support/fake-mailer.js';
 import { InMemoryUserRepository } from '../../users/__tests__/in-memory-user.repository.js';
 import type { DesignerProfile } from '../../users/entities/designer-profile.entity.js';
+import type { User } from '../../users/entities/user.entity.js';
+import type { RoleCode } from '../../users/role-code.enum.js';
 import { ROLE_IDS } from '../../users/role-code.enum.js';
 import type { UserStatus } from '../../users/user-status.js';
 import { UsersService } from '../../users/users.service.js';
@@ -22,6 +25,10 @@ import { AuthService } from '../auth.service.js';
 import { deriveOtpHashKey } from '../otp-code.js';
 import type { OtpConfig } from '../otp.config.js';
 import { OtpService } from '../otp.service.js';
+import {
+  derivePasswordFingerprintKey,
+  passwordFingerprint,
+} from '../password-fingerprint.js';
 import { InMemoryOtpRepository } from './in-memory-otp.repository.js';
 
 const SECOND = 1_000;
@@ -62,7 +69,25 @@ function setup() {
   });
   const users = new UsersService(userRepo, clock);
   const otp = new OtpService(otpRepo, clock, otpConfig, fakeUow);
-  const service = new AuthService(users, otp, hasher, mailer, otpConfig, jwt);
+  const fingerprintKey = derivePasswordFingerprintKey(SECRET);
+  const service = new AuthService(
+    users,
+    otp,
+    hasher,
+    mailer,
+    otpConfig,
+    jwt,
+    fingerprintKey,
+  );
+
+  /** Payload hợp lệ cho user theo `password_hash` hiện tại. */
+  function payloadFor(user: User, role: RoleCode = 'CUSTOMER'): JwtPayload {
+    return {
+      sub: user.id,
+      role,
+      pwv: passwordFingerprint(fingerprintKey, user.passwordHash ?? ''),
+    };
+  }
 
   /** User đã có sẵn trong "DB". */
   function seedUser(
@@ -96,7 +121,18 @@ function setup() {
       password: PASSWORD,
     });
 
-  return { clock, userRepo, otpRepo, mailer, jwt, service, seedUser, register };
+  return {
+    clock,
+    userRepo,
+    otpRepo,
+    mailer,
+    jwt,
+    otp,
+    service,
+    seedUser,
+    register,
+    payloadFor,
+  };
 }
 
 describe('AuthService', () => {
@@ -433,12 +469,10 @@ describe('AuthService', () => {
 
   describe('authenticate (kiểm tra token mỗi request)', () => {
     it('user ACTIVE, đúng role → AuthUser', async () => {
-      const { service, seedUser } = setup();
+      const { service, seedUser, payloadFor } = setup();
       const user = seedUser('ACTIVE');
 
-      await expect(
-        service.authenticate({ sub: user.id, role: 'CUSTOMER' }),
-      ).resolves.toEqual({
+      await expect(service.authenticate(payloadFor(user))).resolves.toEqual({
         id: user.id,
         email: EMAIL,
         role: 'CUSTOMER',
@@ -451,11 +485,11 @@ describe('AuthService', () => {
     ] as const)(
       'user bị %s sau khi đăng nhập → %s (401)',
       async (status, code) => {
-        const { service, seedUser } = setup();
+        const { service, seedUser, payloadFor } = setup();
         const user = seedUser(status);
 
         const error = await service
-          .authenticate({ sub: user.id, role: 'CUSTOMER' })
+          .authenticate(payloadFor(user))
           .catch((e: unknown) => e);
 
         expect(error).toBeInstanceOf(UnauthorizedError);
@@ -470,19 +504,237 @@ describe('AuthService', () => {
         service.authenticate({
           sub: '33333333-3333-4333-8333-333333333333',
           role: 'CUSTOMER',
+          pwv: 'khong-quan-trong',
         }),
       ).rejects.toMatchObject({ code: 'INVALID_TOKEN' });
     });
 
     it('role trong token khác role trong DB → INVALID_TOKEN', async () => {
+      const { service, seedUser, payloadFor } = setup();
+      const user = seedUser('ACTIVE');
+
+      await expect(
+        service.authenticate(payloadFor(user, 'ADMIN')),
+      ).rejects.toMatchObject({
+        code: 'INVALID_TOKEN',
+      });
+    });
+
+    it('token từ login hợp lệ; sau khi đặt lại mật khẩu → TOKEN_REVOKED (401)', async () => {
+      const { clock, jwt, mailer, service, seedUser } = setup();
+      seedUser('ACTIVE');
+      const { accessToken } = await service.login(EMAIL, PASSWORD);
+      const payload = await jwt.verifyAsync<JwtPayload>(accessToken);
+      await expect(service.authenticate(payload)).resolves.toMatchObject({
+        email: EMAIL,
+      });
+
+      await service.requestPasswordReset(EMAIL);
+      clock.advance(SECOND);
+      await service.resetPassword(
+        EMAIL,
+        extractOtp(mailer.lastTo(EMAIL))!,
+        'matkhaumoi456',
+      );
+
+      const error = await service
+        .authenticate(payload)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(UnauthorizedError);
+      expect(error).toMatchObject({ code: 'TOKEN_REVOKED' });
+      const fresh = await service.login(EMAIL, 'matkhaumoi456');
+      await expect(
+        service.authenticate(await jwt.verifyAsync(fresh.accessToken)),
+      ).resolves.toMatchObject({ email: EMAIL });
+    });
+
+    it('payload thiếu pwv (token cũ trước khi có claim) → TOKEN_REVOKED', async () => {
       const { service, seedUser } = setup();
       const user = seedUser('ACTIVE');
 
       await expect(
-        service.authenticate({ sub: user.id, role: 'ADMIN' }),
-      ).rejects.toMatchObject({
-        code: 'INVALID_TOKEN',
+        service.authenticate({ sub: user.id, role: 'CUSTOMER' } as JwtPayload),
+      ).rejects.toMatchObject({ code: 'TOKEN_REVOKED' });
+    });
+  });
+
+  describe('requestPasswordReset', () => {
+    it('user ACTIVE → OTP PASSWORD_RESET, gửi email đặt lại mật khẩu', async () => {
+      const { otpRepo, mailer, service, seedUser } = setup();
+      const user = seedUser('ACTIVE');
+
+      await service.requestPasswordReset(EMAIL);
+
+      expect(otpRepo.rows).toHaveLength(1);
+      expect(otpRepo.rows[0]).toMatchObject({
+        userId: user.id,
+        purpose: 'PASSWORD_RESET',
       });
+      expect(mailer.sent).toHaveLength(1);
+      expect(mailer.sent[0]).toMatchObject({
+        to: EMAIL,
+        subject: 'Mã OTP đặt lại mật khẩu',
+      });
+      expect(extractOtp(mailer.sent[0])).toMatch(/^\d{6}$/);
+    });
+
+    it('email không tồn tại → không lỗi, không gửi gì', async () => {
+      const { mailer, otpRepo, service } = setup();
+
+      await expect(
+        service.requestPasswordReset('khong-co@example.com'),
+      ).resolves.toBeUndefined();
+      expect(mailer.sent).toHaveLength(0);
+      expect(otpRepo.rows).toHaveLength(0);
+    });
+
+    it.each(['INVITED', 'LOCKED', 'INACTIVE'] as const)(
+      'user %s → không lỗi, không gửi gì',
+      async (status) => {
+        const { mailer, otpRepo, service, seedUser } = setup();
+        seedUser(status);
+
+        await service.requestPasswordReset(EMAIL);
+
+        expect(mailer.sent).toHaveLength(0);
+        expect(otpRepo.rows).toHaveLength(0);
+      },
+    );
+
+    it('trong cooldown → không lỗi (không lộ email), không gửi thêm; hết cooldown → gửi mới', async () => {
+      const { clock, mailer, service, seedUser } = setup();
+      seedUser('ACTIVE');
+      await service.requestPasswordReset(EMAIL);
+      clock.advance(10 * SECOND);
+
+      await expect(
+        service.requestPasswordReset(EMAIL),
+      ).resolves.toBeUndefined();
+      expect(mailer.sent).toHaveLength(1);
+
+      clock.advance(50 * SECOND);
+      await service.requestPasswordReset(EMAIL);
+      expect(mailer.sent).toHaveLength(2);
+    });
+
+    it('cooldown tính riêng theo purpose: OTP kích hoạt vừa gửi không chặn OTP reset', async () => {
+      const { mailer, service, register } = setup();
+      await register();
+      await service.verifyEmail(EMAIL, extractOtp(mailer.lastTo(EMAIL))!);
+
+      await service.requestPasswordReset(EMAIL);
+
+      expect(mailer.sent).toHaveLength(2);
+    });
+
+    it('gửi email lỗi → không ném lỗi', async () => {
+      const { mailer, service, seedUser } = setup();
+      seedUser('ACTIVE');
+      vi.spyOn(mailer, 'send').mockRejectedValueOnce(new Error('SMTP down'));
+
+      await expect(
+        service.requestPasswordReset(EMAIL),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('resetPassword', () => {
+    const NEW_PASSWORD = 'matkhaumoi456';
+
+    async function requestOtp(ctx: ReturnType<typeof setup>): Promise<string> {
+      await ctx.service.requestPasswordReset(EMAIL);
+      return extractOtp(ctx.mailer.lastTo(EMAIL))!;
+    }
+
+    it('OTP đúng → đổi password_hash, đăng nhập bằng mật khẩu mới, mật khẩu cũ bị từ chối', async () => {
+      const ctx = setup();
+      ctx.seedUser('ACTIVE');
+      const code = await requestOtp(ctx);
+
+      await ctx.service.resetPassword(EMAIL, code, NEW_PASSWORD);
+
+      expect(ctx.userRepo.rows[0].passwordHash).toBe(`hashed:${NEW_PASSWORD}`);
+      await expect(
+        ctx.service.login(EMAIL, NEW_PASSWORD),
+      ).resolves.toHaveProperty('accessToken');
+      await expect(ctx.service.login(EMAIL, PASSWORD)).rejects.toMatchObject({
+        code: 'INVALID_CREDENTIALS',
+      });
+    });
+
+    it('OTP sai → OTP_INVALID, mật khẩu giữ nguyên', async () => {
+      const ctx = setup();
+      ctx.seedUser('ACTIVE');
+      const code = await requestOtp(ctx);
+
+      const error = await ctx.service
+        .resetPassword(
+          EMAIL,
+          code === '000000' ? '000001' : '000000',
+          NEW_PASSWORD,
+        )
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(BusinessRuleError);
+      expect(error).toMatchObject({
+        code: 'OTP_INVALID',
+        details: { remainingAttempts: 4 },
+      });
+      expect(ctx.userRepo.rows[0].passwordHash).toBe(`hashed:${PASSWORD}`);
+    });
+
+    it('OTP đã dùng → lần thứ hai OTP_INVALID', async () => {
+      const ctx = setup();
+      ctx.seedUser('ACTIVE');
+      const code = await requestOtp(ctx);
+      await ctx.service.resetPassword(EMAIL, code, NEW_PASSWORD);
+
+      await expect(
+        ctx.service.resetPassword(EMAIL, code, 'matkhaukhac789'),
+      ).rejects.toMatchObject({ code: 'OTP_INVALID' });
+      expect(ctx.userRepo.rows[0].passwordHash).toBe(`hashed:${NEW_PASSWORD}`);
+    });
+
+    it('OTP hết hạn → OTP_EXPIRED', async () => {
+      const ctx = setup();
+      ctx.seedUser('ACTIVE');
+      const code = await requestOtp(ctx);
+      ctx.clock.advance(15 * 60 * SECOND);
+
+      await expect(
+        ctx.service.resetPassword(EMAIL, code, NEW_PASSWORD),
+      ).rejects.toMatchObject({ code: 'OTP_EXPIRED' });
+    });
+
+    it('OTP ACCOUNT_ACTIVATION không dùng được để đặt lại mật khẩu', async () => {
+      const ctx = setup();
+      const user = ctx.seedUser('ACTIVE');
+      const code = await ctx.otp.issue(user.id, 'ACCOUNT_ACTIVATION');
+
+      await expect(
+        ctx.service.resetPassword(EMAIL, code, NEW_PASSWORD),
+      ).rejects.toMatchObject({ code: 'OTP_INVALID' });
+    });
+
+    it.each(['INVITED', 'LOCKED'] as const)(
+      'user %s → OTP_INVALID, không đổi mật khẩu',
+      async (status) => {
+        const ctx = setup();
+        ctx.seedUser(status);
+
+        await expect(
+          ctx.service.resetPassword(EMAIL, '123456', NEW_PASSWORD),
+        ).rejects.toMatchObject({ code: 'OTP_INVALID' });
+        expect(ctx.userRepo.rows[0].passwordHash).toBe(`hashed:${PASSWORD}`);
+      },
+    );
+
+    it('email không tồn tại → OTP_INVALID (không lộ email)', async () => {
+      const { service } = setup();
+
+      await expect(
+        service.resetPassword('khong-co@example.com', '123456', NEW_PASSWORD),
+      ).rejects.toMatchObject({ code: 'OTP_INVALID' });
     });
   });
 

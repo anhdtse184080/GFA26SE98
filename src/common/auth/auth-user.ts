@@ -11,4 +11,6 @@ export interface AuthUser {
 export interface JwtPayload {
   sub: string;
   role: RoleCode;
+  /** Dấu vân tay `password_hash` lúc phát hành; lệch → token bị thu hồi (đã đổi mật khẩu). */
+  pwv: string;
 }

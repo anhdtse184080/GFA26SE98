@@ -488,6 +488,138 @@ describe('Auth (e2e)', () => {
     });
   });
 
+  describe('quên mật khẩu: forgot-password → reset-password', () => {
+    const NEW_PASSWORD = 'matkhaumoi456';
+    const RESET_SUBJECT = 'Mã OTP đặt lại mật khẩu';
+
+    function forgot(email: string) {
+      return http().post('/auth/forgot-password').send({ email });
+    }
+
+    function reset(email: string, otp: string, newPassword = NEW_PASSWORD) {
+      return http()
+        .post('/auth/reset-password')
+        .send({ email, otp, newPassword });
+    }
+
+    function resetMailsTo(email: string) {
+      return mailer.sent.filter(
+        (m) => m.to === email && m.subject === RESET_SUBJECT,
+      );
+    }
+
+    it('luồng chính: OTP qua email → đổi mật khẩu → mật khẩu mới OK, mật khẩu cũ và token cũ 401', async () => {
+      const { email, token: oldToken } = await activeCustomer();
+      const before = (await userRow(email))?.password_hash;
+
+      const res = await forgot(email).expect(200);
+      expect(res.body).toEqual({ message: expect.any(String) });
+      const mail = mailer.lastTo(email);
+      expect(mail?.subject).toBe(RESET_SUBJECT);
+
+      const done = await reset(email, extractOtp(mail)!).expect(200);
+      expect(done.body).toEqual({ message: expect.any(String) });
+      const after = (await userRow(email))?.password_hash;
+      expect(after).toMatch(/^\$2[aby]\$/);
+      expect(after).not.toBe(before);
+
+      const fresh = await login(email, NEW_PASSWORD).expect(200);
+      const oldPassword = await login(email).expect(401);
+      expect(oldPassword.body).toMatchObject({ code: 'INVALID_CREDENTIALS' });
+
+      const revoked = await http()
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${oldToken}`)
+        .expect(401);
+      expect(revoked.body).toMatchObject({ code: 'TOKEN_REVOKED' });
+      await http()
+        .get('/auth/me')
+        .set(
+          'Authorization',
+          `Bearer ${(fresh.body as { accessToken: string }).accessToken}`,
+        )
+        .expect(200);
+    });
+
+    it('email không tồn tại → 200 cùng body như email thật, không gửi email', async () => {
+      const { email } = await activeCustomer();
+      const unknown = randomEmail();
+
+      const real = await forgot(email).expect(200);
+      const fake = await forgot(unknown).expect(200);
+
+      expect(fake.body).toEqual(real.body);
+      expect(mailer.lastTo(unknown)).toBeUndefined();
+    });
+
+    it('user INVITED không nhận được OTP reset; reset với OTP bất kỳ → 422 OTP_INVALID', async () => {
+      const email = randomEmail();
+      await register(email).expect(201);
+      const sentBefore = mailer.sent.length;
+
+      const res = await forgot(email).expect(200);
+
+      expect(res.body).toEqual({ message: expect.any(String) });
+      expect(mailer.sent.length).toBe(sentBefore);
+      expect(resetMailsTo(email)).toHaveLength(0);
+      const failed = await reset(email, otpFor(email)).expect(422);
+      expect(failed.body).toMatchObject({ code: 'OTP_INVALID' });
+      expect((await userRow(email))?.status).toBe('INVITED');
+    });
+
+    it('OTP sai → 422 OTP_INVALID, mật khẩu cũ vẫn đăng nhập được', async () => {
+      const { email } = await activeCustomer();
+      await forgot(email).expect(200);
+      const otp = otpFor(email);
+
+      const res = await reset(
+        email,
+        otp === '000000' ? '000001' : '000000',
+      ).expect(422);
+
+      expect(res.body).toMatchObject({
+        code: 'OTP_INVALID',
+        details: { remainingAttempts: 4 },
+      });
+      await login(email).expect(200);
+      await login(email, NEW_PASSWORD).expect(401);
+    });
+
+    it('OTP đã dùng → lần hai 422 OTP_INVALID', async () => {
+      const { email } = await activeCustomer();
+      await forgot(email).expect(200);
+      const otp = otpFor(email);
+      await reset(email, otp).expect(200);
+
+      const res = await reset(email, otp, 'matkhaukhac789').expect(422);
+
+      expect(res.body).toMatchObject({ code: 'OTP_INVALID' });
+      await login(email, NEW_PASSWORD).expect(200);
+    });
+
+    it('trong cooldown → vẫn 200 cùng body nhưng không gửi thêm; hết cooldown → gửi mã mới', async () => {
+      const { email } = await activeCustomer();
+      const first = await forgot(email).expect(200);
+
+      const second = await forgot(email).expect(200);
+
+      expect(second.body).toEqual(first.body);
+      expect(resetMailsTo(email)).toHaveLength(1);
+      clock.advance(60 * SECOND);
+      await forgot(email).expect(200);
+      expect(resetMailsTo(email)).toHaveLength(2);
+    });
+
+    it('newPassword yếu → 400 VALIDATION_ERROR field newPassword', async () => {
+      const res = await reset(randomEmail(), '123456', '12345678').expect(400);
+
+      expect(res.body).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        details: { fields: [{ field: 'newPassword' }] },
+      });
+    });
+  });
+
   describe('GET /auth/me – kèm profile', () => {
     it('designer → profile DESIGNER', async () => {
       const hasher = app.get<PasswordHasher>(PASSWORD_HASHER);
@@ -545,6 +677,27 @@ describe('Auth rate limit (e2e)', () => {
 
     await send().expect(401);
     await send().expect(401);
+    const res = await send().expect(429);
+
+    expect(res.body).toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+  });
+
+  it.each([
+    ['/auth/forgot-password', {}, 200],
+    [
+      '/auth/reset-password',
+      { otp: '123456', newPassword: 'matkhaumoi456' },
+      422,
+    ],
+  ])('vượt giới hạn %s → 429', async (path, extra, firstStatus) => {
+    const email = randomEmail();
+    const send = () =>
+      request(app.getHttpServer())
+        .post(path)
+        .send({ email, ...extra });
+
+    await send().expect(firstStatus);
+    await send().expect(firstStatus);
     const res = await send().expect(429);
 
     expect(res.body).toMatchObject({ code: 'TOO_MANY_REQUESTS' });

@@ -4,6 +4,7 @@ import type { AuthUser, JwtPayload } from '../../common/auth/auth-user.js';
 import {
   BusinessRuleError,
   ConflictError,
+  TooManyRequestsError,
   UnauthorizedError,
 } from '../../common/errors/index.js';
 import { MAILER, type Mailer } from '../../common/ports/mailer.js';
@@ -12,12 +13,18 @@ import {
   type PasswordHasher,
 } from '../../common/ports/password-hasher.js';
 import { accountActivationEmail } from '../../infrastructure/mail/templates/account-activation.template.js';
+import { passwordResetEmail } from '../../infrastructure/mail/templates/password-reset.template.js';
 import type { User } from '../users/entities/user.entity.js';
 import { roleCodeOf } from '../users/role-code.enum.js';
 import { UsersService } from '../users/users.service.js';
 import { AuthPolicy } from './auth.policy.js';
 import { OTP_CONFIG, type OtpConfig } from './otp.config.js';
 import { OtpService } from './otp.service.js';
+import {
+  PASSWORD_FINGERPRINT_KEY,
+  passwordFingerprint,
+  passwordFingerprintMatches,
+} from './password-fingerprint.js';
 
 export interface RegisterInput {
   /** Đã chuẩn hóa (trim + lowercase) ở DTO. */
@@ -33,8 +40,8 @@ export interface LoginResult {
 }
 
 /**
- * Đăng ký customer, xác thực email, đăng nhập, xác thực access token.
- * Chấp nhận lời mời (Staff/Designer/Supplier) và đặt lại mật khẩu làm riêng.
+ * Đăng ký customer, xác thực email, đăng nhập, quên/đặt lại mật khẩu, xác thực access token.
+ * Chấp nhận lời mời (Staff/Designer/Supplier) làm riêng.
  */
 @Injectable()
 export class AuthService {
@@ -49,6 +56,7 @@ export class AuthService {
     @Inject(MAILER) private readonly mailer: Mailer,
     @Inject(OTP_CONFIG) private readonly otpConfig: OtpConfig,
     private readonly jwt: JwtService,
+    @Inject(PASSWORD_FINGERPRINT_KEY) private readonly fingerprintKey: Buffer,
   ) {}
 
   /**
@@ -155,8 +163,64 @@ export class AuthService {
     const payload: JwtPayload = {
       sub: updated.id,
       role: roleCodeOf(updated.roleId),
+      pwv: passwordFingerprint(this.fingerprintKey, user.passwordHash),
     };
     return { accessToken: await this.jwt.signAsync(payload), user: updated };
+  }
+
+  /**
+   * Gửi OTP đặt lại mật khẩu cho user ACTIVE. Mọi trường hợp khác (email không tồn tại,
+   * chưa ACTIVE, đang trong cooldown, gửi mail lỗi) bỏ qua im lặng: response luôn giống nhau
+   * để không lộ email nào đang có tài khoản hoạt động.
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    const user = await this.users.findByEmail(email);
+    if (!user || user.status !== 'ACTIVE' || user.passwordHash === null) {
+      return;
+    }
+    try {
+      await this.otp.assertCanResend(user.id, 'PASSWORD_RESET');
+    } catch (error) {
+      if (error instanceof TooManyRequestsError) return;
+      throw error;
+    }
+
+    try {
+      const code = await this.otp.issue(user.id, 'PASSWORD_RESET');
+      const mail = passwordResetEmail({
+        fullName: user.fullName,
+        otp: code,
+        expiresInMinutes: this.otpConfig.ttlMinutes,
+      });
+      await this.mailer.send({ to: user.email, ...mail });
+    } catch (error) {
+      this.logger.error(
+        `Không gửi được OTP đặt lại mật khẩu cho user ${user.id}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  /**
+   * Xác thực OTP `PASSWORD_RESET` rồi đổi mật khẩu. Đổi xong, mọi access token cũ
+   * bị từ chối (claim `pwv` không còn khớp `password_hash`).
+   *
+   * @throws BusinessRuleError `OTP_INVALID` (kể cả email không tồn tại / user không ACTIVE) | `OTP_EXPIRED`
+   * @throws TooManyRequestsError `OTP_TOO_MANY_ATTEMPTS`
+   */
+  async resetPassword(
+    email: string,
+    code: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await this.users.findByEmail(email);
+    if (!user || user.status !== 'ACTIVE' || user.passwordHash === null) {
+      throw new BusinessRuleError('OTP_INVALID', 'Mã OTP không hợp lệ');
+    }
+
+    // Verify ngoài transaction (xem OtpService.verify).
+    await this.otp.verify(user.id, 'PASSWORD_RESET', code);
+    await this.users.changePassword(user, await this.hasher.hash(newPassword));
   }
 
   /** User hiện tại kèm profile designer/supplier. */
@@ -168,7 +232,7 @@ export class AuthService {
    * Gọi từ JwtStrategy cho mỗi request: kiểm tra lại user trong DB, nên token cũ
    * của user đã bị khóa/vô hiệu hóa hoặc đổi role bị từ chối.
    *
-   * @throws UnauthorizedError `INVALID_TOKEN` | `ACCOUNT_LOCKED` | `ACCOUNT_INACTIVE` | `EMAIL_NOT_VERIFIED`
+   * @throws UnauthorizedError `INVALID_TOKEN` | `ACCOUNT_LOCKED` | `ACCOUNT_INACTIVE` | `EMAIL_NOT_VERIFIED` | `TOKEN_REVOKED`
    */
   async authenticate(payload: JwtPayload): Promise<AuthUser> {
     const user =
@@ -179,6 +243,19 @@ export class AuthService {
       throw new UnauthorizedError('INVALID_TOKEN', 'Access token không hợp lệ');
     }
     AuthPolicy.assertCanUseToken(user.status);
+    if (
+      user.passwordHash === null ||
+      !passwordFingerprintMatches(
+        this.fingerprintKey,
+        user.passwordHash,
+        payload.pwv,
+      )
+    ) {
+      throw new UnauthorizedError(
+        'TOKEN_REVOKED',
+        'Phiên đăng nhập đã hết hiệu lực, vui lòng đăng nhập lại',
+      );
+    }
     return { id: user.id, email: user.email, role: payload.role };
   }
 

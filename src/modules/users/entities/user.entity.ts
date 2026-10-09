@@ -105,6 +105,11 @@ export class User {
     this.lastLoginAt = at;
   }
 
+  /** Đặt lại mật khẩu (hash đã tính sẵn). Điều kiện trạng thái do service kiểm tra. */
+  changePassword(passwordHash: string): void {
+    this.passwordHash = passwordHash;
+  }
+
   private transitionTo(to: UserStatus): void {
     if (!canTransitionUserStatus(this.status, to)) {
       throw new BusinessRuleError(
