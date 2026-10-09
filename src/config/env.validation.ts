@@ -177,7 +177,7 @@ export function validateEnv(
         ` - ${e.property}: ${Object.values(e.constraints ?? {}).join('; ')}`,
     );
     throw new Error(
-      `Invalid environment variables (kiểm tra file .env, xem .env.example):\n${lines.join('\n')}`,
+      `Invalid environment variables (kiểm tra file .env):\n${lines.join('\n')}`,
     );
   }
   return env;

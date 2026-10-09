@@ -14,25 +14,19 @@ Dùng PostgreSQL 17 (dữ liệu nghiệp vụ, TypeORM) và MongoDB 8 (dữ li�
 # 1. Cài dependencies
 npm install
 
-# 2. Tạo file .env từ mẫu (sửa JWT_SECRET, mật khẩu nếu cần)
-cp .env.example .env
+# 2. Đặt file .env vào thư mục gốc dự án
 
-# 3. Bật PostgreSQL + MongoDB (chờ đến khi cả hai healthy)
+# 3. Bật PostgreSQL + MongoDB 
 npm run db:up
 
-# 4. Chạy migration (hiện chưa có migration nghiệp vụ)
+# 4. Chạy migration
 npm run migration:run
 
 # 5. Chạy app (watch mode)
 npm run start:dev
-
-# 6. Kiểm tra kết nối DB
-curl http://localhost:3000/health
-# => {"status":"up","details":{"postgres":"up","mongo":"up"}}
 ```
 
-`GET /health` trả `503` kèm chi tiết nếu một trong hai DB không kết nối được.
-App kiểm tra biến môi trường khi khởi động: thiếu hoặc sai biến thì in ra danh sách lỗi và dừng.
+
 
 Tắt DB:
 
@@ -43,7 +37,7 @@ docker compose down -v     # dừng và XÓA toàn bộ dữ liệu (volume)
 
 ## Biến môi trường
 
-Xem [.env.example](.env.example). `POSTGRES_*` và `MONGO_INITDB_*` được docker-compose dùng để khởi tạo container, đồng thời app dùng để kết nối. Nếu đổi user/mật khẩu Mongo thì sửa cả `MONGO_URI`.
+File `.env` không có trong repo, mỗi thành viên nhận riêng. `POSTGRES_*` và `MONGO_INITDB_*` được docker-compose dùng để khởi tạo container, đồng thời app dùng để kết nối. Nếu đổi user/mật khẩu Mongo thì sửa cả `MONGO_URI`.
 Nếu đổi `POSTGRES_PORT`/`MONGO_PORT` (ví dụ máy đã có Postgres chạy ở 5432) thì sửa luôn port trong `MONGO_URI`.
 
 ## Migration (TypeORM)
@@ -73,16 +67,4 @@ npm run test          # unit test (Vitest)
 npm run test:e2e      # e2e, cần `npm run db:up` trước
 ```
 
-## Cấu trúc chính
 
-```
-src/
-├── config/          # ConfigModule global + validate biến môi trường
-├── database/
-│   ├── postgres/    # TypeORM (snake_case naming), data-source.ts cho CLI, migrations/
-│   ├── mongo/       # Mongoose
-│   ├── unit-of-work.ts        # mở transaction (AsyncLocalStorage)
-│   └── transaction-context.ts # repository lấy EntityManager của transaction hiện tại
-├── common/ports/    # interface hạ tầng dùng chung
-└── modules/         # các module nghiệp vụ (health, ...)
-```
