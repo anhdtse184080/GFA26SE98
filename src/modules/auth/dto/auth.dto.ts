@@ -33,6 +33,7 @@ function IsNewPassword(field: string): PropertyDecorator {
 }
 
 class EmailDto {
+  /** @example customer@example.com */
   @Transform(normalizeEmail)
   @IsEmail({}, { message: 'email không hợp lệ' })
   @MaxLength(255)
@@ -40,12 +41,14 @@ class EmailDto {
 }
 
 export class RegisterDto extends EmailDto {
+  /** @example Nguyễn Văn A */
   @Transform(trim)
   @IsString()
   @IsNotEmpty()
   @MaxLength(150)
   fullName: string;
 
+  /** @example 0901234567 */
   @IsOptional()
   @Transform(trim)
   @Matches(/^\+?\d{9,15}$/, {
@@ -53,11 +56,19 @@ export class RegisterDto extends EmailDto {
   })
   phone?: string;
 
+  /**
+   * 8–72 ký tự, có cả chữ và số
+   * @example Password123
+   */
   @IsNewPassword('password')
   password: string;
 }
 
 class OtpDto extends EmailDto {
+  /**
+   * Mã 6 chữ số gửi qua email
+   * @example 123456
+   */
   @IsString()
   @Matches(/^\d{6}$/, { message: 'otp phải gồm 6 chữ số' })
   otp: string;
@@ -70,11 +81,16 @@ export class ResendOtpDto extends EmailDto {}
 export class ForgotPasswordDto extends EmailDto {}
 
 export class ResetPasswordDto extends OtpDto {
+  /**
+   * 8–72 ký tự, có cả chữ và số
+   * @example NewPassword123
+   */
   @IsNewPassword('newPassword')
   newPassword: string;
 }
 
 export class LoginDto extends EmailDto {
+  /** @example Password123 */
   @IsString()
   @IsNotEmpty()
   @MaxLength(72)

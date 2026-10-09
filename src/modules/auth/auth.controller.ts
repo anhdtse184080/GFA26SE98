@@ -7,6 +7,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import type { AuthUser } from '../../common/auth/auth-user.js';
 import { CurrentUser, Public } from '../../common/auth/decorators.js';
@@ -27,6 +28,7 @@ import {
   UserResponseDto,
 } from './dto/auth.response.dto.js';
 
+@ApiTags('auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}

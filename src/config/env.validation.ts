@@ -136,6 +136,15 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   AUTH_THROTTLE_TTL_SECONDS: number = 60;
+
+  /** Bật Swagger UI tại `/docs` (mặc định bật). Chuyển tay như `MAIL_SECURE`. */
+  @Transform(({ obj }: { obj: Record<string, unknown> }) =>
+    obj.SWAGGER_ENABLED === undefined
+      ? true
+      : parseBoolean(obj.SWAGGER_ENABLED),
+  )
+  @IsBoolean()
+  SWAGGER_ENABLED: boolean = true;
 }
 
 function isSmtp(env: EnvironmentVariables): boolean {

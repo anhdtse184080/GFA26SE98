@@ -1,3 +1,4 @@
+import { ApiExtraModels, ApiProperty, getSchemaPath } from '@nestjs/swagger';
 import type { DesignerProfile } from '../../users/entities/designer-profile.entity.js';
 import type { SupplierProfile } from '../../users/entities/supplier-profile.entity.js';
 import type { User } from '../../users/entities/user.entity.js';
@@ -87,7 +88,16 @@ export class SupplierProfileResponseDto {
 }
 
 /** GET /auth/me: user + profile (designer/supplier), các role khác `profile = null`. */
+@ApiExtraModels(DesignerProfileResponseDto, SupplierProfileResponseDto)
 export class MeResponseDto extends UserResponseDto {
+  @ApiProperty({
+    nullable: true,
+    description: 'Profile theo role (phân biệt bằng `type`); role khác → null',
+    oneOf: [
+      { $ref: getSchemaPath(DesignerProfileResponseDto) },
+      { $ref: getSchemaPath(SupplierProfileResponseDto) },
+    ],
+  })
   profile: DesignerProfileResponseDto | SupplierProfileResponseDto | null;
 
   static fromWithProfile(user: User): MeResponseDto {

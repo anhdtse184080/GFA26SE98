@@ -7,5 +7,7 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.e2e-spec.ts'],
+    // E2E không bao giờ gửi mail thật, kể cả khi .env của máy dev đặt MAIL_DRIVER=smtp.
+    env: { MAIL_DRIVER: 'log' },
   },
 });
