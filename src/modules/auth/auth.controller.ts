@@ -1,0 +1,89 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
+import type { AuthUser } from '../../common/auth/auth-user.js';
+import { CurrentUser, Public } from '../../common/auth/decorators.js';
+import { AuthService } from './auth.service.js';
+import {
+  LoginDto,
+  RegisterDto,
+  ResendOtpDto,
+  VerifyEmailDto,
+} from './dto/auth.dto.js';
+import {
+  LoginResponseDto,
+  MeResponseDto,
+  MessageResponseDto,
+  RegisterResponseDto,
+  UserResponseDto,
+} from './dto/auth.response.dto.js';
+
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly auth: AuthService) {}
+
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Post('register')
+  async register(@Body() dto: RegisterDto): Promise<RegisterResponseDto> {
+    const user = await this.auth.register({
+      email: dto.email,
+      fullName: dto.fullName,
+      phone: dto.phone ?? null,
+      password: dto.password,
+    });
+    return {
+      message:
+        'Đăng ký thành công, vui lòng kiểm tra email để lấy mã OTP kích hoạt tài khoản',
+      user: UserResponseDto.from(user),
+    };
+  }
+
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  async verifyEmail(@Body() dto: VerifyEmailDto): Promise<RegisterResponseDto> {
+    const user = await this.auth.verifyEmail(dto.email, dto.otp);
+    return {
+      message: 'Xác thực email thành công, bạn có thể đăng nhập',
+      user: UserResponseDto.from(user),
+    };
+  }
+
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Post('resend-otp')
+  @HttpCode(HttpStatus.OK)
+  async resendOtp(@Body() dto: ResendOtpDto): Promise<MessageResponseDto> {
+    await this.auth.resendActivationOtp(dto.email);
+    return {
+      message:
+        'Nếu email đã đăng ký và chưa xác thực, mã OTP mới đã được gửi tới email đó',
+    };
+  }
+
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Post('login')
+  @HttpCode(HttpStatus.OK)
+  async login(@Body() dto: LoginDto): Promise<LoginResponseDto> {
+    const { accessToken, user } = await this.auth.login(
+      dto.email,
+      dto.password,
+    );
+    return { accessToken, user: UserResponseDto.from(user) };
+  }
+
+  @Get('me')
+  async me(@CurrentUser() current: AuthUser): Promise<MeResponseDto> {
+    return MeResponseDto.fromWithProfile(await this.auth.me(current.id));
+  }
+}
