@@ -9,12 +9,11 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-
-const trim = ({ value }: { value: unknown }) =>
-  typeof value === 'string' ? value.trim() : value;
-
-const normalizeEmail = ({ value }: { value: unknown }) =>
-  typeof value === 'string' ? value.trim().toLowerCase() : value;
+import {
+  normalizeEmail,
+  PHONE_PATTERN,
+  trim,
+} from '../../../common/validation/transforms.js';
 
 /** Ít nhất một chữ cái (kể cả có dấu) và một chữ số. */
 const PASSWORD_PATTERN = /^(?=.*\p{L})(?=.*\d).+$/u;
@@ -51,7 +50,7 @@ export class RegisterDto extends EmailDto {
   /** @example 0901234567 */
   @IsOptional()
   @Transform(trim)
-  @Matches(/^\+?\d{9,15}$/, {
+  @Matches(PHONE_PATTERN, {
     message: 'phone phải gồm 9–15 chữ số, có thể bắt đầu bằng +',
   })
   phone?: string;
@@ -76,6 +75,16 @@ class OtpDto extends EmailDto {
 
 export class VerifyEmailDto extends OtpDto {}
 
+/** Staff/Designer/Supplier được Admin mời: OTP trong email lời mời + mật khẩu tự đặt. */
+export class AcceptInviteDto extends OtpDto {
+  /**
+   * 8–72 ký tự, có cả chữ và số
+   * @example Password123
+   */
+  @IsNewPassword('password')
+  password: string;
+}
+
 export class ResendOtpDto extends EmailDto {}
 
 export class ForgotPasswordDto extends EmailDto {}
@@ -95,4 +104,19 @@ export class LoginDto extends EmailDto {
   @IsNotEmpty()
   @MaxLength(72)
   password: string;
+}
+
+export class ChangePasswordDto {
+  /** @example Password123 */
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(72)
+  currentPassword: string;
+
+  /**
+   * 8–72 ký tự, có cả chữ và số, khác mật khẩu hiện tại
+   * @example NewPassword123
+   */
+  @IsNewPassword('newPassword')
+  newPassword: string;
 }

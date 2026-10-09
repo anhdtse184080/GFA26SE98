@@ -15,6 +15,7 @@ import {
   PARTNERSHIP_STATUSES,
   type PartnershipStatus,
 } from '../partnership-status.js';
+import { assignDefined } from './assign-defined.js';
 import { User } from './user.entity.js';
 
 @Entity({ name: 'supplier_profiles' })
@@ -77,4 +78,22 @@ export class SupplierProfile {
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
+
+  /** `undefined` = giữ nguyên, `null` = xóa (cột nullable). Không đổi `partnership_status`. */
+  update(patch: SupplierProfilePatch): void {
+    assignDefined(this, patch);
+  }
 }
+
+export type SupplierProfilePatch = Partial<
+  Pick<
+    SupplierProfile,
+    | 'companyName'
+    | 'taxCode'
+    | 'businessAddress'
+    | 'contactName'
+    | 'contactPhone'
+    | 'website'
+    | 'partnerSince'
+  >
+>;

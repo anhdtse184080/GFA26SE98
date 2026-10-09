@@ -118,6 +118,11 @@ export class EnvironmentVariables {
   @Min(1)
   OTP_TTL_MINUTES: number = 15;
 
+  /** Thời hạn OTP trong email mời kích hoạt tài khoản do Admin tạo (giờ). */
+  @IsInt()
+  @Min(1)
+  INVITE_OTP_TTL_HOURS: number = 72;
+
   /** Số lần nhập sai tối đa cho một OTP. */
   @IsInt()
   @Min(1)

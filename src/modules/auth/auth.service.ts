@@ -1,5 +1,4 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import type { AuthUser, JwtPayload } from '../../common/auth/auth-user.js';
 import {
   BusinessRuleError,
@@ -14,15 +13,17 @@ import {
 } from '../../common/ports/password-hasher.js';
 import { accountActivationEmail } from '../../infrastructure/mail/templates/account-activation.template.js';
 import { passwordResetEmail } from '../../infrastructure/mail/templates/password-reset.template.js';
+import { OTP_CONFIG, type OtpConfig } from '../otp/otp.config.js';
+import { OtpService } from '../otp/otp.service.js';
+import { AccountInvitationService } from '../users/account-invitation.service.js';
 import type { User } from '../users/entities/user.entity.js';
 import { roleCodeOf } from '../users/role-code.enum.js';
+import { UserAccountPolicy } from '../users/user-account.policy.js';
 import { UsersService } from '../users/users.service.js';
+import { AccessTokenService } from './access-token.service.js';
 import { AuthPolicy } from './auth.policy.js';
-import { OTP_CONFIG, type OtpConfig } from './otp.config.js';
-import { OtpService } from './otp.service.js';
 import {
   PASSWORD_FINGERPRINT_KEY,
-  passwordFingerprint,
   passwordFingerprintMatches,
 } from './password-fingerprint.js';
 
@@ -40,8 +41,8 @@ export interface LoginResult {
 }
 
 /**
- * Đăng ký customer, xác thực email, đăng nhập, quên/đặt lại mật khẩu, xác thực access token.
- * Chấp nhận lời mời (Staff/Designer/Supplier) làm riêng.
+ * Đăng ký customer, xác thực email, nhận lời mời (Staff/Designer/Supplier), đăng nhập,
+ * quên/đặt lại mật khẩu, xác thực access token.
  */
 @Injectable()
 export class AuthService {
@@ -52,10 +53,11 @@ export class AuthService {
   constructor(
     private readonly users: UsersService,
     private readonly otp: OtpService,
+    private readonly invitation: AccountInvitationService,
     @Inject(PASSWORD_HASHER) private readonly hasher: PasswordHasher,
     @Inject(MAILER) private readonly mailer: Mailer,
     @Inject(OTP_CONFIG) private readonly otpConfig: OtpConfig,
-    private readonly jwt: JwtService,
+    private readonly tokens: AccessTokenService,
     @Inject(PASSWORD_FINGERPRINT_KEY) private readonly fingerprintKey: Buffer,
   ) {}
 
@@ -68,7 +70,7 @@ export class AuthService {
   async register(input: RegisterInput): Promise<User> {
     const existing = await this.users.findByEmail(input.email);
     if (existing) {
-      throw existing.status === 'INVITED' && existing.passwordHash !== null
+      throw UserAccountPolicy.activationMethod(existing) === 'SELF_REGISTRATION'
         ? new ConflictError(
             'EMAIL_NOT_VERIFIED',
             'Email đã đăng ký nhưng chưa xác thực, vui lòng gọi /auth/resend-otp để nhận mã mới',
@@ -109,19 +111,7 @@ export class AuthService {
     // Không tiết lộ email có tồn tại hay không.
     if (!user)
       throw new BusinessRuleError('OTP_INVALID', 'Mã OTP không hợp lệ');
-    if (user.status === 'ACTIVE') {
-      throw new ConflictError(
-        'EMAIL_ALREADY_VERIFIED',
-        'Email đã được xác thực, vui lòng đăng nhập',
-      );
-    }
-    if (user.status !== 'INVITED') AuthPolicy.assertCanLogin(user.status);
-    if (user.passwordHash === null) {
-      throw new BusinessRuleError(
-        'ACCEPT_INVITE_REQUIRED',
-        'Tài khoản được mời, vui lòng kích hoạt qua /auth/accept-invite',
-      );
-    }
+    UserAccountPolicy.assertCanVerifyEmail(user);
 
     // Verify ngoài transaction (xem OtpService.verify).
     await this.otp.verify(user.id, 'ACCOUNT_ACTIVATION', code);
@@ -129,14 +119,44 @@ export class AuthService {
   }
 
   /**
-   * Gửi lại OTP kích hoạt cho customer tự đăng ký còn INVITED. Các trường hợp khác
-   * (email không tồn tại, đã ACTIVE, tài khoản được mời) bỏ qua im lặng để không lộ email.
+   * Người được Admin mời nhập OTP trong email lời mời và tự đặt mật khẩu → ACTIVE.
+   * Không tự đăng nhập: client gọi `/auth/login` sau đó.
+   *
+   * @throws BusinessRuleError `OTP_INVALID` (kể cả email không tồn tại) | `OTP_EXPIRED` | `VERIFY_EMAIL_REQUIRED`
+   * @throws TooManyRequestsError `OTP_TOO_MANY_ATTEMPTS`
+   * @throws ConflictError `INVITATION_ALREADY_ACCEPTED`
+   * @throws ForbiddenError `ACCOUNT_LOCKED` | `ACCOUNT_INACTIVE`
+   */
+  async acceptInvite(
+    email: string,
+    code: string,
+    password: string,
+  ): Promise<User> {
+    const user = await this.users.findByEmail(email);
+    if (!user)
+      throw new BusinessRuleError('OTP_INVALID', 'Mã OTP không hợp lệ');
+    UserAccountPolicy.assertCanAcceptInvite(user);
+
+    // Verify ngoài transaction (xem OtpService.verify).
+    await this.otp.verify(user.id, 'ACCOUNT_ACTIVATION', code);
+    const passwordHash = await this.hasher.hash(password);
+    return this.users.acceptInvitation(user, passwordHash);
+  }
+
+  /**
+   * Gửi lại mã cho tài khoản còn INVITED: customer tự đăng ký nhận OTP kích hoạt,
+   * tài khoản do Admin tạo nhận lại email lời mời (thời hạn lời mời). Các trường hợp khác
+   * (email không tồn tại, đã ACTIVE/LOCKED/INACTIVE) bỏ qua im lặng để không lộ email.
    *
    * @throws TooManyRequestsError `OTP_RESEND_TOO_SOON`
    */
   async resendActivationOtp(email: string): Promise<void> {
     const user = await this.users.findByEmail(email);
-    if (!user || user.status !== 'INVITED' || user.passwordHash === null) {
+    const method = user ? UserAccountPolicy.activationMethod(user) : null;
+    if (!user || method === null) return;
+
+    if (method === 'INVITATION') {
+      await this.invitation.resend(user);
       return;
     }
     await this.otp.assertCanResend(user.id, 'ACCOUNT_ACTIVATION');
@@ -160,12 +180,7 @@ export class AuthService {
     AuthPolicy.assertCanLogin(user.status);
 
     const updated = await this.users.recordLogin(user);
-    const payload: JwtPayload = {
-      sub: updated.id,
-      role: roleCodeOf(updated.roleId),
-      pwv: passwordFingerprint(this.fingerprintKey, user.passwordHash),
-    };
-    return { accessToken: await this.jwt.signAsync(payload), user: updated };
+    return { accessToken: await this.tokens.issue(updated), user: updated };
   }
 
   /**

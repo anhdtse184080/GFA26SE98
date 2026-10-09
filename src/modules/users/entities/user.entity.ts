@@ -16,8 +16,10 @@ import { BusinessRuleError } from '../../../common/errors/index.js';
 import { sqlIn } from '../../../database/postgres/sql-check.js';
 import {
   canTransitionUserStatus,
+  USER_STATUS_ACTION_RULES,
   USER_STATUSES,
   type UserStatus,
+  type UserStatusAction,
 } from '../user-status.js';
 import { DesignerProfile } from './designer-profile.entity.js';
 import { Role } from './role.entity.js';
@@ -60,9 +62,6 @@ export class User {
   @Column({ name: 'phone', type: 'varchar', length: 20, nullable: true })
   phone: string | null;
 
-  @Column({ name: 'avatar_url', type: 'varchar', length: 500, nullable: true })
-  avatarUrl: string | null;
-
   @Column({ name: 'status', type: 'varchar', length: 20 })
   status: UserStatus;
 
@@ -101,6 +100,12 @@ export class User {
     this.activatedAt = at;
   }
 
+  /** Người được Admin mời tự đặt mật khẩu: INVITED → ACTIVE. Điều kiện (chưa có mật khẩu) do policy kiểm tra. */
+  acceptInvitation(passwordHash: string, at: Date): void {
+    this.activate(at);
+    this.passwordHash = passwordHash;
+  }
+
   recordLogin(at: Date): void {
     this.lastLoginAt = at;
   }
@@ -108,6 +113,25 @@ export class User {
   /** Đặt lại mật khẩu (hash đã tính sẵn). Điều kiện trạng thái do service kiểm tra. */
   changePassword(passwordHash: string): void {
     this.passwordHash = passwordHash;
+  }
+
+  /** Sửa thông tin liên hệ: `undefined` = giữ nguyên. */
+  updateContact(patch: { fullName?: string; phone?: string | null }): void {
+    if (patch.fullName !== undefined) this.fullName = patch.fullName;
+    if (patch.phone !== undefined) this.phone = patch.phone;
+  }
+
+  /** Admin khóa / mở khóa / vô hiệu hóa / kích hoạt lại theo `USER_STATUS_ACTION_RULES`. */
+  applyStatusAction(action: UserStatusAction): void {
+    const rule = USER_STATUS_ACTION_RULES[action];
+    if (!rule.from.includes(this.status)) {
+      throw new BusinessRuleError(
+        'INVALID_USER_STATUS_TRANSITION',
+        `Không thể ${action} tài khoản đang ở trạng thái ${this.status}`,
+        { action, from: this.status, allowedFrom: rule.from },
+      );
+    }
+    this.transitionTo(rule.to);
   }
 
   private transitionTo(to: UserStatus): void {

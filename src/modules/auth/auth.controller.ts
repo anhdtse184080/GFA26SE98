@@ -13,6 +13,11 @@ import type { AuthUser } from '../../common/auth/auth-user.js';
 import { CurrentUser, Public } from '../../common/auth/decorators.js';
 import { AuthService } from './auth.service.js';
 import {
+  UserDetailResponseDto,
+  UserResponseDto,
+} from '../users/dto/user.response.dto.js';
+import {
+  AcceptInviteDto,
   ForgotPasswordDto,
   LoginDto,
   RegisterDto,
@@ -22,10 +27,8 @@ import {
 } from './dto/auth.dto.js';
 import {
   LoginResponseDto,
-  MeResponseDto,
   MessageResponseDto,
   RegisterResponseDto,
-  UserResponseDto,
 } from './dto/auth.response.dto.js';
 
 @ApiTags('auth')
@@ -64,13 +67,27 @@ export class AuthController {
 
   @Public()
   @UseGuards(ThrottlerGuard)
+  @Post('accept-invite')
+  @HttpCode(HttpStatus.OK)
+  async acceptInvite(
+    @Body() dto: AcceptInviteDto,
+  ): Promise<RegisterResponseDto> {
+    const user = await this.auth.acceptInvite(dto.email, dto.otp, dto.password);
+    return {
+      message: 'Kích hoạt tài khoản thành công, bạn có thể đăng nhập',
+      user: UserResponseDto.from(user),
+    };
+  }
+
+  @Public()
+  @UseGuards(ThrottlerGuard)
   @Post('resend-otp')
   @HttpCode(HttpStatus.OK)
   async resendOtp(@Body() dto: ResendOtpDto): Promise<MessageResponseDto> {
     await this.auth.resendActivationOtp(dto.email);
     return {
       message:
-        'Nếu email đã đăng ký và chưa xác thực, mã OTP mới đã được gửi tới email đó',
+        'Nếu email thuộc một tài khoản chưa kích hoạt, mã OTP mới đã được gửi tới email đó',
     };
   }
 
@@ -112,7 +129,7 @@ export class AuthController {
   }
 
   @Get('me')
-  async me(@CurrentUser() current: AuthUser): Promise<MeResponseDto> {
-    return MeResponseDto.fromWithProfile(await this.auth.me(current.id));
+  async me(@CurrentUser() current: AuthUser): Promise<UserDetailResponseDto> {
+    return UserDetailResponseDto.from(await this.auth.me(current.id));
   }
 }

@@ -17,6 +17,15 @@ export const ROLE_IDS: Readonly<Record<RoleCode, number>> = {
   SUPPLIER: 5,
 };
 
+/** Tên vai trò hiển thị (cột `roles.name` khi seed, email lời mời). */
+export const ROLE_DISPLAY_NAMES: Readonly<Record<RoleCode, string>> = {
+  ADMIN: 'Quản trị viên',
+  STAFF: 'Nhân viên phụ trách dự án',
+  DESIGNER: 'Nhà thiết kế',
+  CUSTOMER: 'Khách hàng',
+  SUPPLIER: 'Nhà cung cấp',
+};
+
 const ROLE_CODE_BY_ID: ReadonlyMap<number, RoleCode> = new Map(
   (Object.keys(ROLE_IDS) as RoleCode[]).map((code) => [ROLE_IDS[code], code]),
 );

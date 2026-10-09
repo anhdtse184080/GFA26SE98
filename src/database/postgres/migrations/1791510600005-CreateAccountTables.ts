@@ -27,7 +27,6 @@ export class CreateAccountTables1791510600005 implements MigrationInterface {
         "password_hash" character varying(255),
         "full_name" character varying(150) NOT NULL,
         "phone" character varying(20),
-        "avatar_url" character varying(500),
         "status" character varying(20) NOT NULL,
         "created_by" uuid,
         "activated_at" TIMESTAMP WITH TIME ZONE,

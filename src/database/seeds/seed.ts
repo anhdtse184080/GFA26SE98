@@ -2,15 +2,11 @@ import type { DataSource } from 'typeorm';
 import type { PasswordHasher } from '../../common/ports/password-hasher.js';
 import { Role } from '../../modules/users/entities/role.entity.js';
 import { User } from '../../modules/users/entities/user.entity.js';
-import { ROLE_IDS, type RoleCode } from '../../modules/users/role-code.enum.js';
-
-const ROLE_NAMES: Readonly<Record<RoleCode, string>> = {
-  ADMIN: 'Quản trị viên',
-  STAFF: 'Nhân viên phụ trách dự án',
-  DESIGNER: 'Nhà thiết kế',
-  CUSTOMER: 'Khách hàng',
-  SUPPLIER: 'Nhà cung cấp',
-};
+import {
+  ROLE_DISPLAY_NAMES,
+  ROLE_IDS,
+  type RoleCode,
+} from '../../modules/users/role-code.enum.js';
 
 export interface SeedOptions {
   adminEmail: string;
@@ -44,7 +40,7 @@ export async function seedDatabase(
     const roles = (Object.keys(ROLE_IDS) as RoleCode[]).map((code) => ({
       id: ROLE_IDS[code],
       code,
-      name: ROLE_NAMES[code],
+      name: ROLE_DISPLAY_NAMES[code],
     }));
     await manager.getRepository(Role).upsert(roles, ['id']);
 

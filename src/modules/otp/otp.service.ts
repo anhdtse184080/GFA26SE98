@@ -32,8 +32,14 @@ export class OtpService {
   /**
    * Sinh OTP mới (kênh EMAIL), vô hiệu các OTP chưa dùng trước đó cùng user + purpose.
    * Trả mã gốc để gửi email; DB chỉ lưu hash.
+   *
+   * @param ttlMinutes thời hạn riêng (vd lời mời dùng `inviteTtlHours`); mặc định `OTP_TTL_MINUTES`.
    */
-  async issue(userId: string, purpose: OtpPurpose): Promise<string> {
+  async issue(
+    userId: string,
+    purpose: OtpPurpose,
+    ttlMinutes: number = this.config.ttlMinutes,
+  ): Promise<string> {
     const code = generateOtpCode();
     const now = this.clock.now();
     await this.uow.run(async () => {
@@ -43,9 +49,7 @@ export class OtpService {
         purpose,
         channel: 'EMAIL',
         codeHash: hashOtpCode(this.config.hashKey, userId, purpose, code),
-        expiresAt: new Date(
-          now.getTime() + this.config.ttlMinutes * MS_PER_MINUTE,
-        ),
+        expiresAt: new Date(now.getTime() + ttlMinutes * MS_PER_MINUTE),
         createdAt: now,
       });
     });
