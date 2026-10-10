@@ -15,6 +15,7 @@ try {
 }
 
 const env = validateEnv(process.env);
+const isProduction = env.NODE_ENV === 'production';
 const dataSource = new DataSource({
   ...buildTypeOrmOptions(env),
   entities: [ENTITIES_GLOB],
@@ -27,6 +28,26 @@ try {
     {
       adminEmail: env.SEED_ADMIN_EMAIL,
       adminPassword: env.SEED_ADMIN_PASSWORD,
+      demoAccounts: isProduction
+        ? null
+        : {
+            STAFF: {
+              email: env.SEED_STAFF_EMAIL,
+              password: env.SEED_STAFF_PASSWORD,
+            },
+            DESIGNER: {
+              email: env.SEED_DESIGNER_EMAIL,
+              password: env.SEED_DESIGNER_PASSWORD,
+            },
+            SUPPLIER: {
+              email: env.SEED_SUPPLIER_EMAIL,
+              password: env.SEED_SUPPLIER_PASSWORD,
+            },
+            CUSTOMER: {
+              email: env.SEED_CUSTOMER_EMAIL,
+              password: env.SEED_CUSTOMER_PASSWORD,
+            },
+          },
     },
     new BcryptPasswordHasher(),
   );
@@ -36,6 +57,16 @@ try {
       ? `[seed] Đã tạo Admin ${env.SEED_ADMIN_EMAIL}`
       : `[seed] Admin ${env.SEED_ADMIN_EMAIL} đã tồn tại, bỏ qua`,
   );
+  if (isProduction) {
+    console.log('[seed] NODE_ENV=production: bỏ qua tài khoản demo');
+  }
+  for (const demo of result.demoUsers) {
+    console.log(
+      demo.created
+        ? `[seed] Đã tạo ${demo.role} ${demo.email}`
+        : `[seed] ${demo.role} ${demo.email} đã tồn tại, bỏ qua`,
+    );
+  }
 } finally {
   await dataSource.destroy();
 }

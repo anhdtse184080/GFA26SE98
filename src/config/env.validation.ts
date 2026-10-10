@@ -71,6 +71,35 @@ export class EnvironmentVariables {
   @MinLength(8)
   SEED_ADMIN_PASSWORD: string;
 
+  /** Tài khoản demo mỗi role do `npm run seed` tạo (ACTIVE, đăng nhập được ngay; bỏ qua khi production). */
+  @IsEmail()
+  SEED_STAFF_EMAIL: string = 'staff@fa26se095.local';
+
+  @IsString()
+  @MinLength(8)
+  SEED_STAFF_PASSWORD: string = 'Demo@12345';
+
+  @IsEmail()
+  SEED_DESIGNER_EMAIL: string = 'designer@fa26se095.local';
+
+  @IsString()
+  @MinLength(8)
+  SEED_DESIGNER_PASSWORD: string = 'Demo@12345';
+
+  @IsEmail()
+  SEED_SUPPLIER_EMAIL: string = 'supplier@fa26se095.local';
+
+  @IsString()
+  @MinLength(8)
+  SEED_SUPPLIER_PASSWORD: string = 'Demo@12345';
+
+  @IsEmail()
+  SEED_CUSTOMER_EMAIL: string = 'customer@fa26se095.local';
+
+  @IsString()
+  @MinLength(8)
+  SEED_CUSTOMER_PASSWORD: string = 'Demo@12345';
+
   /** Gốc URL của frontend, dùng tạo link trong email mời kích hoạt. */
   @IsUrl({ require_tld: false, require_protocol: true })
   FRONTEND_URL: string;
