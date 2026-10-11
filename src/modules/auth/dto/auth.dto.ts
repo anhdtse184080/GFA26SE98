@@ -120,3 +120,11 @@ export class ChangePasswordDto {
   @IsNewPassword('newPassword')
   newPassword: string;
 }
+
+export class RefreshTokenDto {
+  /** Refresh token nhận được khi đăng nhập / refresh gần nhất */
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1024)
+  refreshToken: string;
+}

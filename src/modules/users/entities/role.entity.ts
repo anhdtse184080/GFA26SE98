@@ -1,6 +1,6 @@
 import { Check, Column, Entity, PrimaryColumn, Unique } from 'typeorm';
 import { sqlIn } from '../../../database/postgres/sql-check.js';
-import { ROLE_CODES, type RoleCode } from '../role-code.enum.js';
+import { ROLE_CODES, type RoleCode } from '../../../common/auth/role-code.js';
 
 @Entity({ name: 'roles' })
 @Unique('uq_roles_code', ['code'])

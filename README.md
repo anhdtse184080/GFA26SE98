@@ -1,7 +1,7 @@
 # FA26SE095 – Backend
 
 Backend NestJS 12 (TypeScript, ESM) cho nền tảng quản lý và cộng tác thiết kế nội thất tích hợp AI tạo sinh.
-Dùng PostgreSQL 17 (dữ liệu nghiệp vụ, TypeORM) và MongoDB 8 (dữ liệu AI, Mongoose).
+Dùng PostgreSQL 17 + pgvector (TypeORM) cho toàn bộ dữ liệu, kể cả dữ liệu AI.
 
 ## Yêu cầu
 
@@ -16,7 +16,7 @@ npm install
 
 # 2. Đặt file .env vào thư mục gốc dự án
 
-# 3. Bật PostgreSQL + MongoDB 
+# 3. Bật PostgreSQL
 npm run db:up
 
 # 4. Chạy migration
@@ -37,8 +37,8 @@ docker compose down -v     # dừng và XÓA toàn bộ dữ liệu (volume)
 
 ## Biến môi trường
 
-File `.env` không có trong repo, mỗi thành viên nhận riêng. `POSTGRES_*` và `MONGO_INITDB_*` được docker-compose dùng để khởi tạo container, đồng thời app dùng để kết nối. Nếu đổi user/mật khẩu Mongo thì sửa cả `MONGO_URI`.
-Nếu đổi `POSTGRES_PORT`/`MONGO_PORT` (ví dụ máy đã có Postgres chạy ở 5432) thì sửa luôn port trong `MONGO_URI`.
+File `.env` không có trong repo, mỗi thành viên nhận riêng. `POSTGRES_*` được docker-compose dùng để khởi tạo container, đồng thời app dùng để kết nối.
+Nếu máy đã có Postgres chạy ở 5432 thì đổi `POSTGRES_PORT`.
 
 ## Migration (TypeORM)
 

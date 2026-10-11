@@ -3,7 +3,7 @@ import { isEmail } from 'class-validator';
 import { validateEnv } from '../../config/env.validation.js';
 import { createMailer } from './create-mailer.js';
 import { SmtpMailer } from './smtp-mailer.js';
-import { testMailEmail } from './templates/test-mail.template.js';
+import { testMailEmail } from '../../common/mail-templates/test-mail.template.js';
 
 try {
   process.loadEnvFile();

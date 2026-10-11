@@ -10,7 +10,6 @@ import {
   Unique,
   UpdateDateColumn,
 } from 'typeorm';
-import { assignDefined } from './assign-defined.js';
 import { User } from './user.entity.js';
 
 @Entity({ name: 'designer_profiles' })
@@ -80,7 +79,9 @@ export class DesignerProfile {
 
   /** `undefined` = giữ nguyên, `null` = xóa (cột nullable). Không đổi `is_available` (endpoint riêng). */
   update(patch: DesignerProfilePatch): void {
-    assignDefined(this, patch);
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) Object.assign(this, { [key]: value });
+    }
   }
 
   setAvailability(isAvailable: boolean): void {

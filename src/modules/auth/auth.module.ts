@@ -9,16 +9,9 @@ import { RolesGuard } from '../../common/auth/roles.guard.js';
 import type { EnvironmentVariables } from '../../config/env.validation.js';
 import { OtpModule } from '../otp/otp.module.js';
 import { UsersModule } from '../users/users.module.js';
-import { AccessTokenService } from './access-token.service.js';
-import { AccountController } from './account.controller.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
-import { JWT_SECRET, JwtStrategy } from './jwt.strategy.js';
-import { PasswordChangeService } from './password-change.service.js';
-import {
-  derivePasswordFingerprintKey,
-  PASSWORD_FINGERPRINT_KEY,
-} from './password-fingerprint.js';
+import { JwtStrategy } from './jwt.strategy.js';
 
 type Config = ConfigService<EnvironmentVariables, true>;
 
@@ -29,6 +22,7 @@ const MS_PER_SECOND = 1_000;
     UsersModule,
     OtpModule,
     PassportModule,
+    // Cấu hình mặc định cho access token; refresh token ký bằng khóa riêng trong AuthService.
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: Config) => ({
@@ -55,23 +49,10 @@ const MS_PER_SECOND = 1_000;
       ],
     }),
   ],
-  controllers: [AuthController, AccountController],
+  controllers: [AuthController],
   providers: [
     AuthService,
-    AccessTokenService,
-    PasswordChangeService,
     JwtStrategy,
-    {
-      provide: PASSWORD_FINGERPRINT_KEY,
-      inject: [ConfigService],
-      useFactory: (config: Config) =>
-        derivePasswordFingerprintKey(config.get('JWT_SECRET', { infer: true })),
-    },
-    {
-      provide: JWT_SECRET,
-      inject: [ConfigService],
-      useFactory: (config: Config) => config.get('JWT_SECRET', { infer: true }),
-    },
     // Thứ tự đăng ký = thứ tự chạy: xác thực token trước, kiểm tra role sau.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },

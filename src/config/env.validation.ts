@@ -52,16 +52,17 @@ export class EnvironmentVariables {
   POSTGRES_DB: string;
 
   @IsString()
-  @IsNotEmpty()
-  MONGO_URI: string;
-
-  @IsString()
   @MinLength(32)
   JWT_SECRET: string;
 
   @IsString()
   @IsNotEmpty()
   JWT_EXPIRES_IN: string;
+
+  /** Hạn refresh token, dạng `7d` (thư viện `ms`). */
+  @IsString()
+  @IsNotEmpty()
+  REFRESH_TOKEN_EXPIRES_IN: string;
 
   /** Tài khoản Admin đầu tiên do `npm run seed` tạo. */
   @IsEmail()

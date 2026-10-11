@@ -8,7 +8,7 @@ import {
   ROLE_DISPLAY_NAMES,
   ROLE_IDS,
   type RoleCode,
-} from '../../modules/users/role-code.enum.js';
+} from '../../common/auth/role-code.js';
 
 export type DemoRole = Exclude<RoleCode, 'ADMIN'>;
 

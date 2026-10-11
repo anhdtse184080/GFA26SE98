@@ -11,12 +11,11 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { sqlIn } from '../../../database/postgres/sql-check.js';
-import {
-  PARTNERSHIP_STATUSES,
-  type PartnershipStatus,
-} from '../partnership-status.js';
-import { assignDefined } from './assign-defined.js';
 import { User } from './user.entity.js';
+
+export const PARTNERSHIP_STATUSES = ['ACTIVE', 'SUSPENDED', 'ENDED'] as const;
+
+export type PartnershipStatus = (typeof PARTNERSHIP_STATUSES)[number];
 
 @Entity({ name: 'supplier_profiles' })
 @Unique('uq_supplier_profiles_tax_code', ['taxCode'])
@@ -81,7 +80,9 @@ export class SupplierProfile {
 
   /** `undefined` = giữ nguyên, `null` = xóa (cột nullable). Không đổi `partnership_status`. */
   update(patch: SupplierProfilePatch): void {
-    assignDefined(this, patch);
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) Object.assign(this, { [key]: value });
+    }
   }
 }
 

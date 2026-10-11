@@ -11,12 +11,14 @@ import {
 } from 'typeorm';
 import { sqlIn } from '../../../database/postgres/sql-check.js';
 import { User } from '../../users/entities/user.entity.js';
-import {
-  OTP_CHANNELS,
-  OTP_PURPOSES,
-  type OtpChannel,
-  type OtpPurpose,
-} from '../otp.enum.js';
+
+export const OTP_PURPOSES = ['ACCOUNT_ACTIVATION', 'PASSWORD_RESET'] as const;
+
+export type OtpPurpose = (typeof OTP_PURPOSES)[number];
+
+export const OTP_CHANNELS = ['EMAIL', 'SMS'] as const;
+
+export type OtpChannel = (typeof OTP_CHANNELS)[number];
 
 @Entity({ name: 'otp_verifications' })
 @Index('idx_otp_verifications_user_id_purpose', ['userId', 'purpose'])

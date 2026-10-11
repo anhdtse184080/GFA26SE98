@@ -4,7 +4,7 @@ import {
   SetMetadata,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import type { RoleCode } from '../../modules/users/role-code.enum.js';
+import type { RoleCode } from './role-code.js';
 import type { AuthUser } from './auth-user.js';
 
 export const IS_PUBLIC_KEY = 'auth:isPublic';

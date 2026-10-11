@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
-import type { RoleCode } from '../../modules/users/role-code.enum.js';
+import type { RoleCode } from './role-code.js';
 import { ForbiddenError } from '../errors/index.js';
 import type { AuthUser } from './auth-user.js';
 import { ROLES_KEY } from './decorators.js';

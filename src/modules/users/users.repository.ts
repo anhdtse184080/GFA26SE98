@@ -1,27 +1,66 @@
 import { Injectable } from '@nestjs/common';
-import type { Paginated } from '../../../common/pagination/paginated.js';
-import { isUniqueViolation } from '../../../database/postgres/unique-violation.js';
-import { TransactionContext } from '../../../database/transaction-context.js';
-import { DesignerProfile } from '../entities/designer-profile.entity.js';
-import { SupplierProfile } from '../entities/supplier-profile.entity.js';
-import { User } from '../entities/user.entity.js';
-import { ROLE_IDS } from '../role-code.enum.js';
-import type {
-  NewDesignerProfile,
-  NewSupplierProfile,
-  NewUser,
-  PageRequest,
-  UserRepository,
-  UserSearchFilter,
-} from './user.repository.js';
+import { ROLE_IDS } from '../../common/auth/role-code.js';
+import type { Paginated } from '../../common/pagination/paginated.js';
+import { isUniqueViolation } from '../../database/postgres/unique-violation.js';
+import { TransactionContext } from '../../database/transaction-context.js';
+import { DesignerProfile } from './entities/designer-profile.entity.js';
+import { SupplierProfile } from './entities/supplier-profile.entity.js';
+import { User, type UserStatus } from './entities/user.entity.js';
+
+export type NewUser = Pick<
+  User,
+  | 'roleId'
+  | 'email'
+  | 'passwordHash'
+  | 'fullName'
+  | 'phone'
+  | 'status'
+  | 'createdById'
+>;
+
+export type NewDesignerProfile = Pick<
+  DesignerProfile,
+  | 'userId'
+  | 'employeeCode'
+  | 'title'
+  | 'specialization'
+  | 'yearsOfExperience'
+  | 'bio'
+>;
+
+export type NewSupplierProfile = Pick<
+  SupplierProfile,
+  | 'userId'
+  | 'companyName'
+  | 'taxCode'
+  | 'businessAddress'
+  | 'contactName'
+  | 'contactPhone'
+  | 'website'
+  | 'partnershipStatus'
+  | 'partnerSince'
+>;
+
+export interface UserSearchFilter {
+  roleId?: number;
+  status?: UserStatus;
+  /** Tìm trong email hoặc họ tên, không phân biệt hoa thường. */
+  keyword?: string;
+}
+
+export interface PageRequest {
+  page: number;
+  limit: number;
+}
 
 /** Escape ký tự đặc biệt của LIKE (`\`, `%`, `_`). */
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 
+/** `users` + `designer_profiles`, `supplier_profiles` (ghi cùng user). Không có `delete`: không xóa cứng tài khoản. */
 @Injectable()
-export class TypeOrmUserRepository implements UserRepository {
+export class UsersRepository {
   constructor(private readonly tx: TransactionContext) {}
 
   private get repo() {
@@ -149,6 +188,19 @@ export class TypeOrmUserRepository implements UserRepository {
       }
       throw error;
     }
+  }
+
+  async rotateRefreshTokenHash(
+    userId: string,
+    sessionId: string,
+    expectedHash: string,
+    newHash: string,
+  ): Promise<boolean> {
+    const result = await this.repo.update(
+      { id: userId, sessionId, refreshTokenHash: expectedHash },
+      { refreshTokenHash: newHash },
+    );
+    return (result.affected ?? 0) > 0;
   }
 
   save(user: User): Promise<User> {

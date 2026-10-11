@@ -1,11 +1,12 @@
 import { ApiExtraModels, ApiProperty, getSchemaPath } from '@nestjs/swagger';
 import type { Paginated } from '../../../common/pagination/paginated.js';
 import type { DesignerProfile } from '../entities/designer-profile.entity.js';
-import type { SupplierProfile } from '../entities/supplier-profile.entity.js';
-import type { User } from '../entities/user.entity.js';
-import type { PartnershipStatus } from '../partnership-status.js';
-import { type RoleCode, roleCodeOf } from '../role-code.enum.js';
-import type { UserStatus } from '../user-status.js';
+import type {
+  PartnershipStatus,
+  SupplierProfile,
+} from '../entities/supplier-profile.entity.js';
+import type { User, UserStatus } from '../entities/user.entity.js';
+import { type RoleCode, roleCodeOf } from '../../../common/auth/role-code.js';
 
 /** Thông tin user trả ra API: không có `password_hash`. */
 export class UserResponseDto {
@@ -86,7 +87,7 @@ export class SupplierProfileResponseDto {
   }
 }
 
-/** User + profile (designer/supplier), các role khác `profile = null`. Dùng cho `/auth/me`, `/admin/users`. */
+/** User + profile (designer/supplier), các role khác `profile = null`. Dùng cho `/users/me`, `/admin/users`. */
 @ApiExtraModels(DesignerProfileResponseDto, SupplierProfileResponseDto)
 export class UserDetailResponseDto extends UserResponseDto {
   @ApiProperty({
