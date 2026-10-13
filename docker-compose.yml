@@ -1,16 +1,19 @@
 name: fa26se095
 
+# Chạy toàn bộ (DB + API): `docker compose up --build`.
+# Không có .env vẫn chạy (giá trị mặc định dev, email chỉ in ra log). Muốn gửi mail thật: đặt file .env do BE gửi vào thư mục gốc repo.
+
 services:
-  postgres:
+  database:
     # PostgreSQL 17 kèm extension pgvector (vector search cho RAG)
     image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:-fa26se095}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fa26se095}
+      POSTGRES_DB: ${POSTGRES_DB:-fa26se095}
     ports:
-      - '${POSTGRES_PORT:?POSTGRES_PORT is required}:5432'
+      - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -19,17 +22,68 @@ services:
       timeout: 5s
       retries: 10
 
+  backend-api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+    ports:
+      - '${PORT:-3000}:3000'
+    volumes:
+      # Bind mount mã nguồn để hot-reload; node_modules giữ trong container (anonymous volume).
+      # Không tách dist ra volume riêng: `nest build` (deleteOutDir) cần xóa được thư mục dist.
+      - .:/app
+      - /app/node_modules
+    # DB mới tạo: chạy migration + seed (chạy lại không tạo trùng) rồi mới bật app.
+    command: sh -c "npm run migration:run && node dist/database/seeds/run-seed.js && npm run start:dev"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      # Trong mạng compose, API kết nối DB qua tên service, cổng nội bộ 5432.
+      POSTGRES_HOST: database
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-fa26se095}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fa26se095}
+      POSTGRES_DB: ${POSTGRES_DB:-fa26se095}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-jwt-secret-change-me-0123456789abcdef}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      REFRESH_TOKEN_EXPIRES_IN: ${REFRESH_TOKEN_EXPIRES_IN:-7d}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@fa26se095.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-Admin@12345}
+      SEED_STAFF_EMAIL: ${SEED_STAFF_EMAIL:-staff@fa26se095.local}
+      SEED_STAFF_PASSWORD: ${SEED_STAFF_PASSWORD:-Demo@12345}
+      SEED_DESIGNER_EMAIL: ${SEED_DESIGNER_EMAIL:-designer@fa26se095.local}
+      SEED_DESIGNER_PASSWORD: ${SEED_DESIGNER_PASSWORD:-Demo@12345}
+      SEED_SUPPLIER_EMAIL: ${SEED_SUPPLIER_EMAIL:-supplier@fa26se095.local}
+      SEED_SUPPLIER_PASSWORD: ${SEED_SUPPLIER_PASSWORD:-Demo@12345}
+      SEED_CUSTOMER_EMAIL: ${SEED_CUSTOMER_EMAIL:-customer@fa26se095.local}
+      SEED_CUSTOMER_PASSWORD: ${SEED_CUSTOMER_PASSWORD:-Demo@12345}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      # `log`: email (OTP, lời mời) chỉ in ra log container, xem bằng `docker compose logs backend-api`.
+      MAIL_DRIVER: ${MAIL_DRIVER:-log}
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-}
+      MAIL_SECURE: ${MAIL_SECURE:-}
+      MAIL_USER: ${MAIL_USER:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-true}
+      # File watcher dạng polling để hot-reload chạy được trên bind mount (Windows/macOS).
+      TSC_WATCHFILE: DynamicPriorityPolling
+      TSC_WATCHDIRECTORY: DynamicPriorityPolling
+
   adminer:
-    # Web UI xem dữ liệu bảng: http://localhost:8080 (System: PostgreSQL, Server: postgres)
+    # Web UI xem dữ liệu bảng: http://localhost:8080 (System: PostgreSQL, Server: database)
     image: adminer:latest
     restart: unless-stopped
     depends_on:
-      postgres:
+      database:
         condition: service_healthy
     ports:
       - '8080:8080'
     environment:
-      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DEFAULT_SERVER: database
 
 volumes:
   postgres_data:

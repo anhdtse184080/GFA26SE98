@@ -5,19 +5,25 @@ Dùng PostgreSQL 17 + pgvector (TypeORM) cho toàn bộ dữ liệu, kể cả d
 
 ## Yêu cầu
 
-- Node.js ≥ 22 (dự án đang dùng Node 26)
 - Docker Desktop (có Docker Compose v2)
+- Node.js ≥ 22 (dự án đang dùng Node 26) – chỉ cần khi chạy app ngoài Docker
 
-## Chạy ở local
+## Chạy bằng Docker (không cần cài Node/Postgres)
+
+```bash
+docker compose up --build
+```
+
+## Chạy ở local (Node trên máy host)
 
 ```bash
 # 1. Cài dependencies
 npm install
 
-# 2. Đặt file .env vào thư mục gốc dự án
+# 2. Đặt file .env (do BE gửi) vào thư mục gốc dự án
 
 # 3. Bật PostgreSQL
-npm run db:up
+docker compose up -d database
 
 # 4. Chạy migration
 npm run migration:run
@@ -34,11 +40,7 @@ Tắt DB:
 npm run db:down            # dừng container, giữ dữ liệu
 docker compose down -v     # dừng và XÓA toàn bộ dữ liệu (volume)
 ```
-
-## Biến môi trường
-
-File `.env` không có trong repo, mỗi thành viên nhận riêng. `POSTGRES_*` được docker-compose dùng để khởi tạo container, đồng thời app dùng để kết nối.
-Nếu máy đã có Postgres chạy ở 5432 thì đổi `POSTGRES_PORT`.
+GRES_PORT`.
 
 ## Migration (TypeORM)
 

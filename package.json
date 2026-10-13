@@ -20,7 +20,6 @@
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
-    "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
     "typeorm": "typeorm -d dist/database/postgres/data-source.js",
     "migration:generate": "npm run build && npm run typeorm -- migration:generate",

@@ -11,6 +11,10 @@ async function bootstrap() {
 
   const config =
     app.get<ConfigService<EnvironmentVariables, true>>(ConfigService);
+  app.enableCors({
+    origin: config.get('FRONTEND_URL', { infer: true }),
+    credentials: true,
+  });
   if (config.get('SWAGGER_ENABLED', { infer: true })) {
     setupSwagger(app);
   }
