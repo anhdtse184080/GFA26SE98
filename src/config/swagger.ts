@@ -20,7 +20,11 @@ export function setupSwagger(app: INestApplication): void {
     .addSecurityRequirements('bearer')
     .build();
 
-  const document = SwaggerModule.createDocument(app, config);
+  // Tắt tự gắn tag theo tên controller: UsersController gắn tag trên từng method (`users`, `admin-users`),
+  // để mặc định sẽ sinh thêm tag "Users" và mỗi route hiện hai lần.
+  const document = SwaggerModule.createDocument(app, config, {
+    autoTagControllers: false,
+  });
   SwaggerModule.setup(SWAGGER_PATH, app, document, {
     swaggerOptions: { persistAuthorization: true },
   });

@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ROLE_IDS } from '../../common/auth/role-code.js';
-import type { Paginated } from '../../common/pagination/paginated.js';
+import type {
+  PageRequest,
+  Paginated,
+} from '../../common/pagination/paginated.js';
+import { escapeLike } from '../../database/postgres/escape-like.js';
 import { isUniqueViolation } from '../../database/postgres/unique-violation.js';
 import { TransactionContext } from '../../database/transaction-context.js';
 import { DesignerProfile } from './entities/designer-profile.entity.js';
@@ -46,16 +50,6 @@ export interface UserSearchFilter {
   status?: UserStatus;
   /** Tìm trong email hoặc họ tên, không phân biệt hoa thường. */
   keyword?: string;
-}
-
-export interface PageRequest {
-  page: number;
-  limit: number;
-}
-
-/** Escape ký tự đặc biệt của LIKE (`\`, `%`, `_`). */
-function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 
 /** `users` + `designer_profiles`, `supplier_profiles` (ghi cùng user). Không có `delete`: không xóa cứng tài khoản. */

@@ -19,5 +19,17 @@ services:
       timeout: 5s
       retries: 10
 
+  adminer:
+    # Web UI xem dữ liệu bảng: http://localhost:8080 (System: PostgreSQL, Server: postgres)
+    image: adminer:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - '8080:8080'
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+
 volumes:
   postgres_data:

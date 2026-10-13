@@ -14,7 +14,10 @@ import {
   NotFoundError,
 } from '../../common/errors/index.js';
 import { staffInvitationEmail } from '../../common/mail-templates/staff-invitation.template.js';
-import type { Paginated } from '../../common/pagination/paginated.js';
+import type {
+  PageRequest,
+  Paginated,
+} from '../../common/pagination/paginated.js';
 import { CLOCK, type Clock } from '../../common/ports/clock.js';
 import { MAILER, type Mailer } from '../../common/ports/mailer.js';
 import type { EnvironmentVariables } from '../../config/env.validation.js';
@@ -31,7 +34,6 @@ import {
 import {
   type NewDesignerProfile,
   type NewSupplierProfile,
-  type PageRequest,
   UsersRepository,
 } from './users.repository.js';
 

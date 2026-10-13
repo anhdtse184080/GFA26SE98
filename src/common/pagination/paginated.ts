@@ -4,3 +4,9 @@ export interface Paginated<T> {
   limit: number;
   total: number;
 }
+
+/** Tham số phân trang truyền từ service xuống repository. */
+export interface PageRequest {
+  page: number;
+  limit: number;
+}

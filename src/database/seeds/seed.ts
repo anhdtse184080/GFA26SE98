@@ -1,5 +1,7 @@
-import type { DataSource, EntityManager } from 'typeorm';
+import { type DataSource, type EntityManager, In } from 'typeorm';
 import type { PasswordHasher } from '../../common/ports/password-hasher.js';
+import { ProductCategory } from '../../modules/catalog/entities/product-category.entity.js';
+import { DesignStyle } from '../../modules/design-styles/entities/design-style.entity.js';
 import { DesignerProfile } from '../../modules/users/entities/designer-profile.entity.js';
 import { Role } from '../../modules/users/entities/role.entity.js';
 import { SupplierProfile } from '../../modules/users/entities/supplier-profile.entity.js';
@@ -30,9 +32,17 @@ export interface DemoUserResult {
   created: boolean;
 }
 
+export interface CatalogSeedResult {
+  /** Số bản ghi mới tạo (đã có thì bỏ qua). */
+  stylesCreated: number;
+  /** Danh mục mẫu của supplier demo (0 ở production). */
+  categoriesCreated: number;
+}
+
 export interface SeedResult {
   adminCreated: boolean;
   demoUsers: DemoUserResult[];
+  catalog: CatalogSeedResult;
 }
 
 interface DemoUser {
@@ -75,6 +85,8 @@ const DEMO_USERS: readonly DemoUser[] = [
  * (đã tồn tại thì giữ nguyên, không ghi đè mật khẩu). Ngoài production còn tạo
  * 1 tài khoản demo ACTIVE (có mật khẩu, đăng nhập được ngay) cho mỗi role
  * STAFF/DESIGNER/SUPPLIER/CUSTOMER, kèm profile — ngoại lệ có chủ đích so với DB_CONTEXT §6.1.
+ * Danh mục: luôn thêm 6 phong cách thiết kế; ngoài production thêm cây danh mục sản phẩm mẫu
+ * cho supplier demo (danh mục riêng từng supplier). Đã có `code` thì bỏ qua, không ghi đè.
  *
  * Ngoại lệ có chủ đích của ARCHITECTURE §4–5: script CLI chạy ngoài Nest DI nên dùng
  * thẳng `DataSource`/QueryBuilder thay vì repository + UnitOfWork. Code trong app không làm vậy.
@@ -112,6 +124,10 @@ export async function seedDatabase(
       name: ROLE_DISPLAY_NAMES[code],
     }));
     await manager.getRepository(Role).upsert(roles, ['id']);
+    const catalog: CatalogSeedResult = {
+      stylesCreated: await insertDesignStyles(manager),
+      categoriesCreated: 0,
+    };
 
     const adminCreated =
       passwordHash !== null &&
@@ -125,7 +141,7 @@ export async function seedDatabase(
       })) !== null;
 
     if (demos.length === 0) {
-      return { adminCreated, demoUsers: [] };
+      return { adminCreated, demoUsers: [], catalog };
     }
     const admin = await manager
       .getRepository(User)
@@ -147,13 +163,26 @@ export async function seedDatabase(
       if (userId !== null) {
         await insertProfile(manager, demo.role, userId);
       }
+      if (demo.role === 'SUPPLIER') {
+        const supplier = await manager.getRepository(SupplierProfile).findOne({
+          where: { user: { email: demo.email } },
+          select: { userId: true },
+        });
+        if (supplier) {
+          catalog.categoriesCreated = await insertProductCategories(
+            manager,
+            supplier.userId,
+          );
+        }
+      }
       demoUsers.push({
         role: demo.role,
         email: demo.email,
         created: userId !== null,
       });
     }
-    return { adminCreated, demoUsers };
+
+    return { adminCreated, demoUsers, catalog };
   });
 }
 
@@ -211,4 +240,125 @@ async function insertProfile(
       partnerSince: null,
     });
   }
+}
+
+// ---------- Catalog ----------
+
+const DESIGN_STYLES = [
+  {
+    code: 'MINIMALIST',
+    name: 'Minimalist',
+    description: 'Tối giản, ít đồ, màu trung tính, nhiều khoảng trống',
+  },
+  {
+    code: 'JAPANDI',
+    name: 'Japandi',
+    description: 'Kết hợp tối giản Nhật Bản và Bắc Âu, gỗ sáng, đường nét mộc',
+  },
+  {
+    code: 'SCANDINAVIAN',
+    name: 'Scandinavian',
+    description: 'Bắc Âu: sáng, ấm, gỗ tự nhiên, công năng cao',
+  },
+  {
+    code: 'INDUSTRIAL',
+    name: 'Industrial',
+    description: 'Công nghiệp: kim loại, bê tông, gạch thô, tông tối',
+  },
+  {
+    code: 'CONTEMPORARY',
+    name: 'Contemporary',
+    description: 'Đương đại: đường nét gọn, vật liệu hiện đại, tương phản',
+  },
+  {
+    code: 'INDOCHINE',
+    name: 'Indochine',
+    description: 'Đông Dương: gỗ tối, gạch bông, mây tre, họa tiết Á Đông',
+  },
+] as const;
+
+/** Danh mục gốc → danh mục con. */
+const PRODUCT_CATEGORY_TREE: ReadonlyArray<{
+  code: string;
+  name: string;
+  children: ReadonlyArray<{ code: string; name: string }>;
+}> = [
+  {
+    code: 'FURNITURE',
+    name: 'Nội thất',
+    children: [
+      { code: 'SOFA', name: 'Sofa' },
+      { code: 'TABLE', name: 'Bàn' },
+      { code: 'BED', name: 'Giường' },
+      { code: 'CABINET', name: 'Tủ' },
+    ],
+  },
+  { code: 'LIGHTING', name: 'Chiếu sáng', children: [] },
+  { code: 'DECOR', name: 'Trang trí', children: [] },
+  { code: 'APPLIANCE', name: 'Thiết bị', children: [] },
+  { code: 'FINISH_MATERIAL', name: 'Vật liệu hoàn thiện', children: [] },
+];
+
+/** Thêm style chưa có (theo `code`), không ghi đè style đã sửa. Trả số style mới tạo. */
+async function insertDesignStyles(manager: EntityManager): Promise<number> {
+  const result = await manager
+    .createQueryBuilder()
+    .insert()
+    .into(DesignStyle)
+    .values(DESIGN_STYLES.map((s) => ({ ...s, isActive: true })))
+    .orIgnore()
+    .returning(['id'])
+    .execute();
+  return (result.raw as unknown[]).length;
+}
+
+/** Thêm danh mục mẫu cho supplier (bỏ qua `code` đã có trong catalog của supplier). Trả số danh mục mới tạo. */
+async function insertProductCategories(
+  manager: EntityManager,
+  supplierId: string,
+): Promise<number> {
+  const repo = manager.getRepository(ProductCategory);
+  const insert = async (
+    values: Pick<
+      ProductCategory,
+      'supplierId' | 'code' | 'name' | 'parentId' | 'isActive'
+    >[],
+  ): Promise<number> => {
+    const result = await repo
+      .createQueryBuilder()
+      .insert()
+      .values(values)
+      .orIgnore()
+      .returning(['id'])
+      .execute();
+    return (result.raw as unknown[]).length;
+  };
+
+  let created = await insert(
+    PRODUCT_CATEGORY_TREE.map((c) => ({
+      supplierId,
+      code: c.code,
+      name: c.name,
+      parentId: null,
+      isActive: true,
+    })),
+  );
+  const roots = await repo.find({
+    where: {
+      supplierId,
+      code: In(PRODUCT_CATEGORY_TREE.map((c) => c.code)),
+    },
+  });
+  const rootIdByCode = new Map(roots.map((r) => [r.code, r.id]));
+  const children = PRODUCT_CATEGORY_TREE.flatMap((root) =>
+    root.children.map((child) => ({
+      supplierId,
+      code: child.code,
+      name: child.name,
+      parentId: rootIdByCode.get(root.code) ?? null,
+      isActive: true,
+    })),
+  );
+  if (children.length > 0) created += await insert(children);
+  return created;
 }

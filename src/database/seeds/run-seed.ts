@@ -53,6 +53,9 @@ try {
   );
   console.log('[seed] 5 roles: OK');
   console.log(
+    `[seed] Danh mục: +${result.catalog.stylesCreated} phong cách, +${result.catalog.categoriesCreated} danh mục sản phẩm`,
+  );
+  console.log(
     result.adminCreated
       ? `[seed] Đã tạo Admin ${env.SEED_ADMIN_EMAIL}`
       : `[seed] Admin ${env.SEED_ADMIN_EMAIL} đã tồn tại, bỏ qua`,
