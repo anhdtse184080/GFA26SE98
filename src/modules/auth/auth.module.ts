@@ -12,6 +12,7 @@ import { UsersModule } from '../users/users.module.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JwtStrategy } from './jwt.strategy.js';
+import { LocalStrategy } from './local.strategy.js';
 
 type Config = ConfigService<EnvironmentVariables, true>;
 
@@ -53,6 +54,7 @@ const MS_PER_SECOND = 1_000;
   providers: [
     AuthService,
     JwtStrategy,
+    LocalStrategy,
     // Thứ tự đăng ký = thứ tự chạy: xác thực token trước, kiểm tra role sau.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },

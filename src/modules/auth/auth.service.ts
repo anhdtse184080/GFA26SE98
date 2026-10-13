@@ -195,12 +195,12 @@ export class AuthService {
   // ---------- Đăng nhập & phiên ----------
 
   /**
-   * Đúng mật khẩu → mở phiên mới (phiên cũ trên thiết bị khác hết hiệu lực).
+   * Gọi từ LocalStrategy: kiểm tra email + mật khẩu và trạng thái tài khoản.
    *
    * @throws UnauthorizedError `INVALID_CREDENTIALS` – sai email hoặc mật khẩu (không phân biệt)
    * @throws ForbiddenError `EMAIL_NOT_VERIFIED` | `ACCOUNT_LOCKED` | `ACCOUNT_INACTIVE`
    */
-  async login(email: string, password: string): Promise<SessionTokens> {
+  async validateCredentials(email: string, password: string): Promise<User> {
     const user = await this.users.findByEmail(email);
     const hash = user?.passwordHash ?? (await this.getDummyHash());
     const matches = await this.hasher.compare(password, hash);
@@ -211,7 +211,11 @@ export class AuthService {
       );
     }
     user.assertCanLogin();
+    return user;
+  }
 
+  /** Mở phiên mới cho user đã qua `validateCredentials` (phiên cũ trên thiết bị khác hết hiệu lực). */
+  async login(user: User): Promise<SessionTokens> {
     return this.startSession(await this.users.recordLogin(user));
   }
 

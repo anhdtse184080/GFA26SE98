@@ -5,13 +5,16 @@ import {
   HttpStatus,
   Post,
   Put,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import type { Request } from 'express';
 import type { AuthUser } from '../../common/auth/auth-user.js';
 import { CurrentUser, Public } from '../../common/auth/decorators.js';
 import { UserResponseDto } from '../users/dto/users.response.dto.js';
+import type { User } from '../users/entities/user.entity.js';
 import { AuthService } from './auth.service.js';
 import {
   AcceptInviteDto,
@@ -31,6 +34,7 @@ import {
   RegisterResponseDto,
   TokenPairResponseDto,
 } from './dto/auth.response.dto.js';
+import { LocalAuthGuard } from './local-auth.guard.js';
 
 /** `/auth/*` (công khai, kiểu RPC – xem ARCHITECTURE §9a) và `PUT /users/me/password`. */
 @ApiTags('auth')
@@ -99,14 +103,15 @@ export class AuthController {
 
   /** Đăng nhập bằng email và mật khẩu, trả access token + refresh token. Chỉ tài khoản ACTIVE đăng nhập được; mỗi tài khoản chỉ một phiên (đăng nhập nơi khác thì phiên cũ hết hiệu lực). */
   @Public()
-  @UseGuards(ThrottlerGuard)
+  @UseGuards(ThrottlerGuard, LocalAuthGuard)
   @Post('auth/login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() dto: LoginDto): Promise<LoginResponseDto> {
-    const { accessToken, refreshToken, user } = await this.auth.login(
-      dto.email,
-      dto.password,
-    );
+  async login(
+    // Body do LocalAuthGuard validate; khai báo ở đây để Swagger hiển thị schema.
+    @Body() _dto: LoginDto,
+    @Req() req: Request & { user: User },
+  ): Promise<LoginResponseDto> {
+    const { accessToken, refreshToken, user } = await this.auth.login(req.user);
     return { accessToken, refreshToken, user: UserResponseDto.from(user) };
   }
 
