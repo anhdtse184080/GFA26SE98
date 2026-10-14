@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { In } from 'typeorm';
 import { isUniqueViolation } from '../../database/postgres/unique-violation.js';
 import { TransactionContext } from '../../database/transaction-context.js';
 import { DesignStyle } from './entities/design-style.entity.js';
@@ -19,6 +20,11 @@ export class DesignStylesRepository {
 
   findById(id: string): Promise<DesignStyle | null> {
     return this.repo.findOne({ where: { id } });
+  }
+
+  findByIds(ids: readonly string[]): Promise<DesignStyle[]> {
+    if (ids.length === 0) return Promise.resolve([]);
+    return this.repo.find({ where: { id: In([...ids]) } });
   }
 
   findAll(isActive?: boolean): Promise<DesignStyle[]> {

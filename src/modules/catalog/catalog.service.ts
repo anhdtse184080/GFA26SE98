@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { Decimal } from 'decimal.js';
 import type { AuthUser } from '../../common/auth/auth-user.js';
 import {
   BusinessRuleError,
@@ -10,17 +11,26 @@ import type {
   PageRequest,
   Paginated,
 } from '../../common/pagination/paginated.js';
+import { CLOCK, type Clock } from '../../common/ports/clock.js';
 import { UnitOfWork } from '../../database/unit-of-work.js';
+import { DesignStylesService } from '../design-styles/design-styles.service.js';
 import { UsersService } from '../users/users.service.js';
 import type {
   ProductCategory,
   ProductCategoryPatch,
 } from './entities/product-category.entity.js';
 import {
+  Product,
+  type ProductPatch,
+  type ProductStatus,
+  type StockStatus,
+} from './entities/product.entity.js';
+import {
   type CategorySearchFilter,
   type NewProductCategory,
   ProductCategoriesRepository,
 } from './product-categories.repository.js';
+import { ProductsRepository } from './products.repository.js';
 
 export type CreateCategoryInput = Omit<NewProductCategory, 'supplierId'>;
 
@@ -29,18 +39,50 @@ export interface UpdateCategoryInput extends ProductCategoryPatch {
   parentId?: string | null;
 }
 
+export interface SearchProductsInput extends PageRequest {
+  keyword?: string;
+  categoryId?: string;
+  styleId?: string;
+  /** Chỉ có tác dụng với Admin/Designer/Staff; Supplier luôn bị giới hạn về sản phẩm của mình. */
+  supplierId?: string;
+  minPrice?: string;
+  maxPrice?: string;
+  stockStatus?: StockStatus;
+  status?: ProductStatus;
+}
+
+/** Field nullable đã được controller chuẩn hóa `undefined` → `null`. `price` là chuỗi thập phân > 0. */
+export type CreateProductInput = Required<ProductPatch> & {
+  categoryId: string;
+  price: string;
+  styleIds: string[];
+};
+
+/** `undefined` = giữ nguyên. `styleIds` có mặt thì thay toàn bộ phong cách. */
+export type UpdateProductInput = ProductPatch & {
+  categoryId?: string;
+  price?: string;
+  styleIds?: string[];
+};
+
 /**
- * Catalog: danh mục sản phẩm dạng cây, **riêng của từng supplier**.
- * Supplier tạo/sửa/ẩn và xem danh mục của mình; Admin xem danh mục của mọi supplier.
- * Không xóa: ẩn bằng `is_active`.
+ * Catalog **riêng của từng supplier**:
+ * - Danh mục dạng cây: Supplier tạo/sửa/ẩn và xem của mình; Admin xem của mọi supplier. Không xóa: ẩn bằng `is_active`.
+ * - Sản phẩm: Supplier tạo/sửa/xem của mình (mọi status); Designer/Staff chỉ xem sản phẩm ACTIVE của supplier
+ *   đang hợp tác (chọn đồ ở Core Flow 4); Admin xem tất cả. Không xóa: ngừng bán bằng `status = INACTIVE`.
  */
 @Injectable()
 export class CatalogService {
   constructor(
     private readonly categories: ProductCategoriesRepository,
+    private readonly products: ProductsRepository,
     private readonly users: UsersService,
+    private readonly styles: DesignStylesService,
     private readonly uow: UnitOfWork,
+    @Inject(CLOCK) private readonly clock: Clock,
   ) {}
+
+  // ---------- Danh mục ----------
 
   /** Danh mục của supplier đang đăng nhập (phẳng, kèm `parentId`). */
   listOwnCategories(
@@ -124,7 +166,188 @@ export class CatalogService {
     });
   }
 
+  // ---------- Sản phẩm ----------
+
+  /**
+   * Supplier: chỉ sản phẩm của mình (mọi status). Designer/Staff: chỉ ACTIVE của supplier đang hợp tác.
+   * Admin: tất cả.
+   * @throws BusinessRuleError `INVALID_PRICE_RANGE`
+   */
+  searchProducts(
+    actor: AuthUser,
+    input: SearchProductsInput,
+  ): Promise<Paginated<Product>> {
+    const { page, limit, ...filter } = input;
+    if (
+      filter.minPrice !== undefined &&
+      filter.maxPrice !== undefined &&
+      new Decimal(filter.minPrice).greaterThan(filter.maxPrice)
+    ) {
+      throw new BusinessRuleError(
+        'INVALID_PRICE_RANGE',
+        'minPrice không được lớn hơn maxPrice',
+        { minPrice: filter.minPrice, maxPrice: filter.maxPrice },
+      );
+    }
+    return this.products.search(
+      {
+        ...filter,
+        keyword: filter.keyword || undefined,
+        supplierId: actor.role === 'SUPPLIER' ? actor.id : filter.supplierId,
+        visibleToBuyers: actor.role === 'DESIGNER' || actor.role === 'STAFF',
+      },
+      { page, limit },
+    );
+  }
+
+  /** @throws NotFoundError `PRODUCT_NOT_FOUND` (cả khi actor không được xem sản phẩm này) */
+  async getProduct(id: string, actor: AuthUser): Promise<Product> {
+    const product = await this.getProductOrThrow(id);
+    if (!this.canViewProduct(product, actor)) throw this.productNotFound(id);
+    return product;
+  }
+
+  /**
+   * @throws ForbiddenError `SUPPLIER_PROFILE_MISSING`
+   * @throws BusinessRuleError `SUPPLIER_NOT_ACTIVE` | `CATEGORY_INACTIVE` | `DESIGN_STYLE_INACTIVE`
+   * @throws NotFoundError `CATEGORY_NOT_FOUND` | `DESIGN_STYLE_NOT_FOUND`
+   * @throws ConflictError `PRODUCT_SKU_EXISTS`
+   */
+  async createProduct(
+    actor: AuthUser,
+    input: CreateProductInput,
+  ): Promise<Product> {
+    const id = await this.uow.run(async () => {
+      const supplierId = await this.getActiveSupplierId(actor);
+      const { categoryId, price, styleIds, ...fields } = input;
+      await this.assertUsableCategory(categoryId, supplierId);
+      await this.assertActiveStyles(styleIds);
+      const product = Object.assign(new Product(), fields, {
+        supplierId,
+        categoryId,
+      });
+      product.changePrice(new Decimal(price), this.clock.now());
+      const saved = await this.products.saveIfSkuAvailable(product, styleIds);
+      if (!saved) throw this.skuTaken(fields.sku);
+      return saved.id;
+    });
+    return this.getProductOrThrow(id);
+  }
+
+  /**
+   * Chỉ sửa sản phẩm của mình (của supplier khác → 404). Đổi giá → cập nhật `price_updated_at`.
+   * Chỉ khi có `styleIds` mới thay toàn bộ `product_styles`.
+   * @throws ForbiddenError `SUPPLIER_PROFILE_MISSING`
+   * @throws BusinessRuleError `SUPPLIER_NOT_ACTIVE` | `CATEGORY_INACTIVE` | `DESIGN_STYLE_INACTIVE`
+   * @throws NotFoundError `PRODUCT_NOT_FOUND` | `CATEGORY_NOT_FOUND` | `DESIGN_STYLE_NOT_FOUND`
+   * @throws ConflictError `PRODUCT_SKU_EXISTS`
+   */
+  async updateProduct(
+    id: string,
+    actor: AuthUser,
+    input: UpdateProductInput,
+  ): Promise<Product> {
+    await this.uow.run(async () => {
+      const supplierId = await this.getActiveSupplierId(actor);
+      const product = await this.getProductOrThrow(id);
+      if (product.supplierId !== supplierId) throw this.productNotFound(id);
+
+      const { categoryId, price, styleIds, ...patch } = input;
+      if (categoryId !== undefined && categoryId !== product.categoryId) {
+        await this.assertUsableCategory(categoryId, supplierId);
+        product.moveToCategory(categoryId);
+      }
+      if (styleIds !== undefined) await this.assertActiveStyles(styleIds);
+      if (price !== undefined) {
+        product.changePrice(new Decimal(price), this.clock.now());
+      }
+      product.update(patch);
+      // styleIds không gửi → undefined → repository không đụng tới product_styles
+      const saved = await this.products.saveIfSkuAvailable(product, styleIds);
+      if (!saved) throw this.skuTaken(patch.sku);
+    });
+    return this.getProductOrThrow(id);
+  }
+
   // ---------- Private ----------
+
+  private async getProductOrThrow(id: string): Promise<Product> {
+    const product = await this.products.findById(id);
+    if (!product) throw this.productNotFound(id);
+    return product;
+  }
+
+  private productNotFound(id: string): NotFoundError {
+    return new NotFoundError('PRODUCT_NOT_FOUND', 'Không tìm thấy sản phẩm', {
+      productId: id,
+    });
+  }
+
+  private skuTaken(sku: string | undefined): ConflictError {
+    return new ConflictError(
+      'PRODUCT_SKU_EXISTS',
+      'Mã SKU đã tồn tại trong catalog của bạn',
+      { sku },
+    );
+  }
+
+  private canViewProduct(product: Product, actor: AuthUser): boolean {
+    switch (actor.role) {
+      case 'ADMIN':
+        return true;
+      case 'SUPPLIER':
+        return product.supplierId === actor.id;
+      case 'DESIGNER':
+      case 'STAFF':
+        return product.isVisibleToBuyers();
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Danh mục của sản phẩm phải thuộc catalog của supplier và đang hoạt động.
+   * @throws NotFoundError `CATEGORY_NOT_FOUND`
+   * @throws BusinessRuleError `CATEGORY_INACTIVE`
+   */
+  private async assertUsableCategory(
+    categoryId: string,
+    supplierId: string,
+  ): Promise<void> {
+    const category = await this.getOwnCategory(categoryId, supplierId);
+    if (!category.isActive) {
+      throw new BusinessRuleError(
+        'CATEGORY_INACTIVE',
+        'Danh mục sản phẩm đang bị ẩn',
+        { categoryId },
+      );
+    }
+  }
+
+  /**
+   * @throws NotFoundError `DESIGN_STYLE_NOT_FOUND`
+   * @throws BusinessRuleError `DESIGN_STYLE_INACTIVE`
+   */
+  private async assertActiveStyles(styleIds: readonly string[]): Promise<void> {
+    const found = await this.styles.findByIds(styleIds);
+    const foundIds = new Set(found.map((s) => s.id));
+    const missing = styleIds.filter((id) => !foundIds.has(id));
+    if (missing.length > 0) {
+      throw new NotFoundError(
+        'DESIGN_STYLE_NOT_FOUND',
+        'Không tìm thấy phong cách thiết kế',
+        { styleIds: missing },
+      );
+    }
+    const inactive = found.filter((s) => !s.isActive).map((s) => s.id);
+    if (inactive.length > 0) {
+      throw new BusinessRuleError(
+        'DESIGN_STYLE_INACTIVE',
+        'Phong cách thiết kế đang bị ẩn',
+        { styleIds: inactive },
+      );
+    }
+  }
 
   private async getCategoryOrThrow(id: string): Promise<ProductCategory> {
     const category = await this.categories.findById(id);

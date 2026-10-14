@@ -18,6 +18,11 @@ export class DesignStylesService {
     return this.styles.findAll(isActive);
   }
 
+  /** Style theo danh sách id (bỏ qua id không tồn tại; caller tự đối chiếu). */
+  findByIds(ids: readonly string[]): Promise<DesignStyle[]> {
+    return this.styles.findByIds(ids);
+  }
+
   /** @throws NotFoundError `DESIGN_STYLE_NOT_FOUND` */
   async get(id: string): Promise<DesignStyle> {
     const style = await this.styles.findById(id);
