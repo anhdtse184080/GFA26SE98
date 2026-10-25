@@ -3,10 +3,15 @@ import { ConfigService } from '@nestjs/config';
 import { APP_FILTER, APP_PIPE } from '@nestjs/core';
 import type { EnvironmentVariables } from '../config/env.validation.js';
 import { BcryptPasswordHasher } from '../infrastructure/bcrypt-password-hasher.js';
+import {
+  decodeGcsCredentials,
+  GcsFileStorage,
+} from '../infrastructure/gcs-file-storage.js';
 import { createMailer } from '../infrastructure/mail/create-mailer.js';
 import { SystemClock } from '../infrastructure/system-clock.js';
 import { DomainExceptionFilter } from './filters/domain-exception.filter.js';
 import { CLOCK } from './ports/clock.js';
+import { FILE_STORAGE } from './ports/file-storage.js';
 import { MAILER } from './ports/mailer.js';
 import { PASSWORD_HASHER } from './ports/password-hasher.js';
 import { createValidationPipe } from './validation/validation.pipe.js';
@@ -30,9 +35,21 @@ import { createValidationPipe } from './validation/validation.pipe.js';
           MAIL_FROM: config.get('MAIL_FROM', { infer: true }),
         }),
     },
+    {
+      provide: FILE_STORAGE,
+      inject: [ConfigService],
+      // validateEnv đã kiểm tra GCS_CREDENTIALS_BASE64 giải mã được.
+      useFactory: (config: ConfigService<EnvironmentVariables, true>) =>
+        new GcsFileStorage(
+          config.get('GCS_BUCKET', { infer: true }),
+          decodeGcsCredentials(
+            config.get('GCS_CREDENTIALS_BASE64', { infer: true }),
+          )!,
+        ),
+    },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },
     { provide: APP_PIPE, useFactory: createValidationPipe },
   ],
-  exports: [PASSWORD_HASHER, CLOCK, MAILER],
+  exports: [PASSWORD_HASHER, CLOCK, MAILER, FILE_STORAGE],
 })
 export class CommonModule {}

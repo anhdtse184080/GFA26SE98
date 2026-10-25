@@ -1,7 +1,7 @@
 name: fa26se095
 
 # Chạy toàn bộ (DB + API): `docker compose up --build`.
-# Không có .env vẫn chạy (giá trị mặc định dev, email chỉ in ra log). Muốn gửi mail thật: đặt file .env do BE gửi vào thư mục gốc repo.
+
 
 services:
   database:
@@ -69,6 +69,9 @@ services:
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
       MAIL_FROM: ${MAIL_FROM:-}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-true}
+      # Lưu file (ảnh/model 3D sản phẩm) trên Google Cloud Storage, bucket private. Bắt buộc, đặt trong .env.
+      GCS_BUCKET: ${GCS_BUCKET:?Thiếu GCS_BUCKET trong .env}
+      GCS_CREDENTIALS_BASE64: ${GCS_CREDENTIALS_BASE64:?Thiếu GCS_CREDENTIALS_BASE64 trong .env}
       # File watcher dạng polling để hot-reload chạy được trên bind mount (Windows/macOS).
       TSC_WATCHFILE: DynamicPriorityPolling
       TSC_WATCHDIRECTORY: DynamicPriorityPolling

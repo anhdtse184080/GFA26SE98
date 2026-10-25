@@ -13,12 +13,20 @@ import {
   Unique,
   UpdateDateColumn,
 } from 'typeorm';
+import type { AuthUser } from '../../../common/auth/auth-user.js';
 import { sqlIn } from '../../../database/postgres/sql-check.js';
 import { SupplierProfile } from '../../users/entities/supplier-profile.entity.js';
-import { ProductCategory } from './product-category.entity.js';
+import { ProductCategory } from '../../catalog/entities/product-category.entity.js';
 import { ProductStyle } from './product-style.entity.js';
 
-export const PRODUCT_UNITS = ['PIECE', 'SET', 'M2', 'M', 'LITER', 'KG'] as const;
+export const PRODUCT_UNITS = [
+  'PIECE',
+  'SET',
+  'M2',
+  'M',
+  'LITER',
+  'KG',
+] as const;
 export type ProductUnit = (typeof PRODUCT_UNITS)[number];
 
 export const STOCK_STATUSES = [
@@ -110,21 +118,26 @@ export class Product {
   @Column({ name: 'stock_status', type: 'varchar', length: 20 })
   stockStatus: StockStatus;
 
+  /**
+   * **Khóa** file ảnh trên FileStorage (vd `products/<id>/thumbnail-<ts>.png`), không phải URL công khai.
+   * Tên cột giữ theo DB_CONTEXT; client tải qua `GET /products/:id/thumbnail`. Đổi qua `replaceThumbnail`.
+   */
   @Column({
     name: 'thumbnail_url',
     type: 'varchar',
     length: 500,
     nullable: true,
   })
-  thumbnailUrl: string | null;
+  thumbnailKey: string | null;
 
+  /** **Khóa** file model 3D (.glb) trên FileStorage; tải qua `GET /products/:id/model-3d`. Đổi qua `replaceModel3d`. */
   @Column({
     name: 'model_3d_url',
     type: 'varchar',
     length: 500,
     nullable: true,
   })
-  model3dUrl: string | null;
+  model3dKey: string | null;
 
   @Column({ name: 'specifications', type: 'jsonb', nullable: true })
   specifications: Record<string, unknown> | null;
@@ -145,7 +158,7 @@ export class Product {
   @OneToMany(() => ProductStyle, (ps) => ps.product)
   styles?: Relation<ProductStyle>[];
 
-  /** `undefined` = giữ nguyên, `null` = xóa (cột nullable). Giá, danh mục, style đổi qua method riêng. */
+  /** `undefined` = giữ nguyên, `null` = xóa (cột nullable). Giá, danh mục, style, file đổi qua method riêng. */
   update(patch: ProductPatch): void {
     for (const [key, value] of Object.entries(patch)) {
       if (value !== undefined) Object.assign(this, { [key]: value });
@@ -165,6 +178,28 @@ export class Product {
   moveToCategory(categoryId: string): void {
     this.categoryId = categoryId;
     this.category = undefined;
+  }
+
+  /** Gắn khóa ảnh mới (file đã lưu lên storage); trả khóa cũ để xóa sau khi commit. */
+  replaceThumbnail(key: string): string | null {
+    const previous = this.thumbnailKey;
+    this.thumbnailKey = key;
+    return previous;
+  }
+
+  /** Gắn khóa model 3D mới; trả khóa cũ để xóa sau khi commit. */
+  replaceModel3d(key: string): string | null {
+    const previous = this.model3dKey;
+    this.model3dKey = key;
+    return previous;
+  }
+
+  /** Model 3D chỉ dành cho Supplier chủ sản phẩm và Designer (dựng cảnh); role khác không được tải. */
+  isModel3dVisibleTo(viewer: Pick<AuthUser, 'id' | 'role'>): boolean {
+    return (
+      viewer.role === 'DESIGNER' ||
+      (viewer.role === 'SUPPLIER' && viewer.id === this.supplierId)
+    );
   }
 
   isVisibleToBuyers(): boolean {
@@ -189,8 +224,6 @@ export type ProductPatch = Partial<
     | 'heightMm'
     | 'unit'
     | 'stockStatus'
-    | 'thumbnailUrl'
-    | 'model3dUrl'
     | 'specifications'
     | 'status'
   >

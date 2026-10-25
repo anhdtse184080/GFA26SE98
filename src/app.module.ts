@@ -5,6 +5,7 @@ import { DatabaseModule } from './database/database.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { CatalogModule } from './modules/catalog/catalog.module.js';
 import { DesignStylesModule } from './modules/design-styles/design-styles.module.js';
+import { ProductsModule } from './modules/products/products.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 
 @Module({
@@ -16,6 +17,7 @@ import { UsersModule } from './modules/users/users.module.js';
     UsersModule,
     DesignStylesModule,
     CatalogModule,
+    ProductsModule,
   ],
 })
 export class AppModule {}

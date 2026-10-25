@@ -11,9 +11,11 @@ import {
   Max,
   Min,
   MinLength,
+  ValidateBy,
   ValidateIf,
   validateSync,
 } from 'class-validator';
+import { decodeGcsCredentials } from '../infrastructure/gcs-file-storage.js';
 
 export const NODE_ENVS = ['development', 'test', 'production'] as const;
 
@@ -172,6 +174,15 @@ export class EnvironmentVariables {
   @Min(1)
   AUTH_THROTTLE_TTL_SECONDS: number = 60;
 
+  /** Bucket Google Cloud Storage (private) lưu file: ảnh/model 3D sản phẩm… */
+  @IsString()
+  @IsNotEmpty()
+  GCS_BUCKET: string;
+
+  /** JSON key của service account (quyền đọc/ghi object trên bucket), mã hóa base64 trên một dòng. */
+  @IsGcsCredentials()
+  GCS_CREDENTIALS_BASE64: string;
+
   /** Bật Swagger UI tại `/docs` (mặc định bật). Chuyển tay như `MAIL_SECURE`. */
   @Transform(({ obj }: { obj: Record<string, unknown> }) =>
     obj.SWAGGER_ENABLED === undefined
@@ -180,6 +191,19 @@ export class EnvironmentVariables {
   )
   @IsBoolean()
   SWAGGER_ENABLED: boolean = true;
+}
+
+/** Không in giá trị trong thông báo lỗi (là secret). */
+function IsGcsCredentials() {
+  return ValidateBy({
+    name: 'isGcsCredentials',
+    validator: {
+      validate: (value: unknown) =>
+        typeof value === 'string' && decodeGcsCredentials(value) !== null,
+      defaultMessage: () =>
+        'GCS_CREDENTIALS_BASE64 phải là JSON key service account (có client_email, private_key) mã hóa base64',
+    },
+  });
 }
 
 function isSmtp(env: EnvironmentVariables): boolean {

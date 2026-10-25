@@ -47,6 +47,22 @@ export class ProductsRepository {
     });
   }
 
+  /** Chỉ cột của `products`, khóa dòng (`FOR UPDATE`) đến hết transaction: dùng khi thay file. */
+  findByIdForUpdate(id: string): Promise<Product | null> {
+    return this.repo.findOne({
+      where: { id },
+      lock: { mode: 'pessimistic_write' },
+    });
+  }
+
+  /** Chỉ ghi khóa file (`thumbnail_url`, `model_3d_url`) và `updated_at`. */
+  async saveFileKeys(product: Product): Promise<void> {
+    await this.repo.update(
+      { id: product.id },
+      { thumbnailKey: product.thumbnailKey, model3dKey: product.model3dKey },
+    );
+  }
+
   async search(
     filter: ProductSearchFilter,
     page: PageRequest,
@@ -138,7 +154,9 @@ export class ProductsRepository {
     const styleRepo = this.tx.manager.getRepository(ProductStyle);
     await styleRepo.delete({ productId });
     if (styleIds.length > 0) {
-      await styleRepo.insert(styleIds.map((styleId) => ({ productId, styleId })));
+      await styleRepo.insert(
+        styleIds.map((styleId) => ({ productId, styleId })),
+      );
     }
   }
 }
