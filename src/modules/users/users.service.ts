@@ -131,12 +131,8 @@ export class UsersService {
   }
 
   /**
-   * Tìm customer để mời vào dự án: role CUSTOMER, tự đăng ký (`created_by = null`), ACTIVE.
+   * Tìm customer để gắn làm chủ căn hộ khi Staff/Admin tạo căn hộ hộ: role CUSTOMER, tự đăng ký (`created_by = null`), ACTIVE.
    * Email không thuộc customer tự đăng ký coi như không tìm thấy. `email` phải đã chuẩn hóa.
-   *
-   * TODO(projects): ProjectsService.inviteCustomer(projectId, email, actor) gọi method này (DB_CONTEXT §6 quy tắc 1):
-   *  - Staff chỉ mời vào dự án mình phụ trách (`projects.staff_id = actor.id`); Admin mời được mọi dự án.
-   *  - Gán `projects.customer_id`; phải bằng `apartments.owner_id` của `projects.apartment_id` (ràng buộc toàn vẹn §6).
    *
    * @throws NotFoundError `USER_NOT_FOUND`
    * @throws BusinessRuleError `USER_NOT_ACTIVE`

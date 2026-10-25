@@ -174,6 +174,11 @@ export class EnvironmentVariables {
   @Min(1)
   AUTH_THROTTLE_TTL_SECONDS: number = 60;
 
+  /** Số lượt gọi AI mặc định của mỗi dự án mới (`projects.ai_generation_limit`). */
+  @IsInt()
+  @Min(0)
+  AI_GENERATION_LIMIT_DEFAULT: number = 50;
+
   /** Bucket Google Cloud Storage (private) lưu file: ảnh/model 3D sản phẩm… */
   @IsString()
   @IsNotEmpty()

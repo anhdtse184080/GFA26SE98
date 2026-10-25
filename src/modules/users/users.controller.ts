@@ -69,7 +69,7 @@ export class UsersController {
     return UserDetailResponseDto.from(user);
   }
 
-  /** Admin/Staff tìm customer theo email để mời vào dự án. Chỉ trả tài khoản customer tự đăng ký và đã ACTIVE. */
+  /** Admin/Staff tìm customer theo email để tạo căn hộ hộ. Chỉ trả tài khoản customer tự đăng ký và đã ACTIVE. */
   @ApiTags('users')
   @Roles('ADMIN', 'STAFF')
   @Get('users/customers')

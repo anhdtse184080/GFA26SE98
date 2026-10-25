@@ -38,6 +38,9 @@ export function buildTypeOrmOptions(env: PostgresEnv) {
     uuidExtension: 'pgcrypto',
     installExtensions: false,
     namingStrategy: new SnakeNamingStrategy(),
+    // Mặc định TypeORM bỏ qua điều kiện null/undefined trong `where` → findOne trả bản ghi bất kỳ.
+    // Cần điều kiện NULL thật thì dùng IsNull().
+    invalidWhereValuesBehavior: { null: 'throw', undefined: 'throw' },
     migrations: [join(import.meta.dirname, 'migrations', '*.js')],
     migrationsTableName: 'migrations',
   } satisfies DataSourceOptions;
