@@ -9,6 +9,7 @@ import {
   PrimaryGeneratedColumn,
   type Relation,
 } from 'typeorm';
+import { BusinessRuleError } from '../../../common/errors/index.js';
 import { sqlIn } from '../../../database/postgres/sql-check.js';
 import { User } from '../../users/entities/user.entity.js';
 import { DesignVersion } from './design-version.entity.js';
@@ -78,4 +79,23 @@ export class RevisionRequest {
 
   @Column({ name: 'resolved_at', type: 'timestamptz', nullable: true })
   resolvedAt: Date | null;
+
+  isPending(): boolean {
+    return this.status === 'OPEN' || this.status === 'IN_PROGRESS';
+  }
+
+  /** Designer đã nộp bản sửa `versionId`. */
+  resolve(versionId: string, at: Date): void {
+    if (!this.isPending()) {
+      throw new BusinessRuleError(
+        'INVALID_REVISION_REQUEST_STATUS_TRANSITION',
+        `Không thể chuyển yêu cầu sửa từ ${this.status} sang RESOLVED`,
+        { from: this.status },
+      );
+    }
+    this.status = 'RESOLVED';
+    this.resolvedInVersionId = versionId;
+    this.resolvedInVersion = undefined;
+    this.resolvedAt = at;
+  }
 }

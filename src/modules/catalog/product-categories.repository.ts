@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { In } from 'typeorm';
 import type {
   PageRequest,
   Paginated,
@@ -38,6 +39,11 @@ export class ProductCategoriesRepository {
       where: { id },
       lock: { mode: 'pessimistic_write' },
     });
+  }
+
+  findActiveByCodes(codes: readonly string[]): Promise<ProductCategory[]> {
+    if (!codes.length) return Promise.resolve([]);
+    return this.repo.find({ where: { code: In([...codes]), isActive: true } });
   }
 
   findAll(isActive?: boolean): Promise<ProductCategory[]> {

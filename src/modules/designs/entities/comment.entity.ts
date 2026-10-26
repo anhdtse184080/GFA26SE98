@@ -9,6 +9,7 @@ import {
   PrimaryGeneratedColumn,
   type Relation,
 } from 'typeorm';
+import { BusinessRuleError } from '../../../common/errors/index.js';
 import { sqlIn } from '../../../database/postgres/sql-check.js';
 import { Product } from '../../products/entities/product.entity.js';
 import { User } from '../../users/entities/user.entity.js';
@@ -18,6 +19,21 @@ import { DesignVersion } from './design-version.entity.js';
 /** Chỉ comment gốc dùng trạng thái; câu trả lời (`parent_comment_id` khác null) bỏ qua giá trị này. */
 export const COMMENT_STATUSES = ['OPEN', 'ADDRESSED', 'RESOLVED'] as const;
 export type CommentStatus = (typeof COMMENT_STATUSES)[number];
+
+/**
+ * Quy tắc 14: OPEN → ADDRESSED (Designer tick khi có version mới) → RESOLVED (khách Accept)
+ * hoặc về OPEN (khách "Not yet" kèm trả lời). RESOLVED là trạng thái cuối.
+ */
+const COMMENT_STATUS_TRANSITIONS: Readonly<
+  Record<CommentStatus, readonly CommentStatus[]>
+> = {
+  OPEN: ['ADDRESSED'],
+  ADDRESSED: ['RESOLVED', 'OPEN'],
+  RESOLVED: [],
+};
+
+/** Loại comment suy ra từ dữ liệu, không lưu cột. */
+export type CommentKind = 'ELEMENT' | 'POINT' | 'GENERAL';
 
 /** Điểm ghim trên mặt bằng (mét). */
 export interface PinPosition {
@@ -112,4 +128,49 @@ export class Comment {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
+
+  get kind(): CommentKind {
+    if (this.designElementId !== null) return 'ELEMENT';
+    if (this.pinPosition !== null) return 'POINT';
+    return 'GENERAL';
+  }
+
+  isRoot(): boolean {
+    return this.parentCommentId === null;
+  }
+
+  /** Designer: đã xử lý ở version `versionId` (service kiểm tra cùng dự án, cùng `version_type`, mới hơn). */
+  markAddressed(versionId: string): void {
+    this.transitionTo('ADDRESSED');
+    this.addressedInVersionId = versionId;
+    this.addressedInVersion = undefined;
+  }
+
+  /** Khách Accept. */
+  resolve(): void {
+    this.transitionTo('RESOLVED');
+  }
+
+  /** Khách "Not yet": về OPEN, bỏ đánh dấu version đã xử lý (câu trả lời do service tạo). */
+  reopen(): void {
+    this.transitionTo('OPEN');
+    this.addressedInVersionId = null;
+    this.addressedInVersion = undefined;
+  }
+
+  private transitionTo(next: CommentStatus): void {
+    if (
+      !this.isRoot() ||
+      !COMMENT_STATUS_TRANSITIONS[this.status].includes(next)
+    ) {
+      throw new BusinessRuleError(
+        'INVALID_COMMENT_STATUS_TRANSITION',
+        this.isRoot()
+          ? `Không thể chuyển comment từ ${this.status} sang ${next}`
+          : 'Chỉ comment gốc có trạng thái, câu trả lời thì không',
+        { from: this.status, to: next },
+      );
+    }
+    this.status = next;
+  }
 }

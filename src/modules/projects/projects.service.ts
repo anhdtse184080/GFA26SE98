@@ -215,6 +215,22 @@ export class ProjectsService {
     return project;
   }
 
+  /**
+   * Chuyển giai đoạn dự án theo thiết kế được duyệt (module designs gọi trong transaction của nó):
+   * duyệt mặt bằng → PRODUCT_SELECTION, duyệt sản phẩm → QUOTING.
+   * @throws NotFoundError `PROJECT_NOT_FOUND`
+   * @throws BusinessRuleError `INVALID_PROJECT_STATUS_TRANSITION`
+   */
+  async advanceDesignStage(
+    id: string,
+    to: 'PRODUCT_SELECTION' | 'QUOTING',
+  ): Promise<void> {
+    const project = await this.getProjectOrThrow(id);
+    if (to === 'PRODUCT_SELECTION') project.startProductSelection();
+    else project.startQuoting();
+    await this.projects.save(project);
+  }
+
   // ---------- Private ----------
 
   private async getProjectOrThrow(id: string): Promise<Project> {

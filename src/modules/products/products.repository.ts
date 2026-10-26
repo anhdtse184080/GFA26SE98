@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { In } from 'typeorm';
 import type {
   PageRequest,
   Paginated,
@@ -12,6 +13,9 @@ import {
   type StockStatus,
 } from './entities/product.entity.js';
 import { ProductStyle } from './entities/product-style.entity.js';
+
+/** UUID không bao giờ khớp, thay cho danh sách rỗng trong `IN (...)`. */
+const NO_MATCH_ID = '00000000-0000-0000-0000-000000000000';
 
 export interface ProductSearchFilter {
   supplierId?: string;
@@ -52,6 +56,58 @@ export class ProductsRepository {
     return this.repo.findOne({
       where: { id },
       lock: { mode: 'pessimistic_write' },
+    });
+  }
+
+  /** Sản phẩm chọn được (ACTIVE, supplier đang hợp tác) của một danh mục, rẻ trước; kèm supplier. */
+  async findChoosableByCategory(
+    categoryId: string,
+    page: PageRequest,
+  ): Promise<Paginated<Product>> {
+    const [items, total] = await this.choosable()
+      .andWhere('p.categoryId = :categoryId', { categoryId })
+      .orderBy('p.price', 'ASC')
+      .addOrderBy('p.id', 'ASC')
+      .skip((page.page - 1) * page.limit)
+      .take(page.limit)
+      .getManyAndCount();
+    return { items, page: page.page, limit: page.limit, total };
+  }
+
+  /** Sản phẩm chọn được theo id và / hoặc `block_code`; kèm supplier. */
+  findChoosable(filter: {
+    ids?: readonly string[];
+    blockCodes?: readonly string[];
+  }): Promise<Product[]> {
+    const ids = filter.ids ?? [];
+    const blockCodes = filter.blockCodes ?? [];
+    if (!ids.length && !blockCodes.length) return Promise.resolve([]);
+    return this.choosable()
+      .andWhere(
+        '(p.id IN (:...ids) OR p.blockCode IN (:...blockCodes))',
+        // IN () rỗng không hợp lệ: thêm giá trị không bao giờ khớp
+        {
+          ids: ids.length ? [...ids] : [NO_MATCH_ID],
+          blockCodes: blockCodes.length ? [...blockCodes] : [''],
+        },
+      )
+      .getMany();
+  }
+
+  private choosable() {
+    return this.repo
+      .createQueryBuilder('p')
+      .innerJoinAndSelect('p.supplier', 's')
+      .where("p.status = 'ACTIVE'")
+      .andWhere("s.partnershipStatus = 'ACTIVE'");
+  }
+
+  /** Chỉ `block_code`, `category_id` của các sản phẩm có `block_code` trong danh sách. */
+  findByBlockCodes(blockCodes: readonly string[]): Promise<Product[]> {
+    if (!blockCodes.length) return Promise.resolve([]);
+    return this.repo.find({
+      where: { blockCode: In([...blockCodes]) },
+      select: { id: true, blockCode: true, categoryId: true },
     });
   }
 

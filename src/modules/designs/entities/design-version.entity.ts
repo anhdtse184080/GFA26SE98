@@ -9,6 +9,7 @@ import {
   type Relation,
   Unique,
 } from 'typeorm';
+import { BusinessRuleError } from '../../../common/errors/index.js';
 import { sqlIn } from '../../../database/postgres/sql-check.js';
 import { Project } from '../../projects/entities/project.entity.js';
 import { User } from '../../users/entities/user.entity.js';
@@ -36,6 +37,32 @@ export const DESIGN_VERSION_STATUSES = [
   'SUPERSEDED',
 ] as const;
 export type DesignVersionStatus = (typeof DESIGN_VERSION_STATUSES)[number];
+
+/**
+ * Số version `MAJOR` tối đa trong một `(project_id, version_type)` (DB_CONTEXT §6 quy tắc 7).
+ * TODO(contracts): đổi sang `contracts.max_revisions_per_stage` khi có module contracts.
+ */
+export const MAX_MAJOR_REVISIONS_PER_STAGE = 3;
+
+/**
+ * Chuyển trạng thái hợp lệ. `SUPERSEDED → APPROVED`: khách chọn duyệt một bản cũ (quy tắc 7).
+ * `APPROVED` là trạng thái cuối.
+ */
+const DESIGN_VERSION_STATUS_TRANSITIONS: Readonly<
+  Record<DesignVersionStatus, readonly DesignVersionStatus[]>
+> = {
+  DRAFT: ['SUBMITTED'],
+  SUBMITTED: ['REVISION_REQUESTED', 'APPROVED', 'SUPERSEDED'],
+  REVISION_REQUESTED: ['APPROVED', 'SUPERSEDED'],
+  SUPERSEDED: ['APPROVED'],
+  APPROVED: [],
+};
+
+/** Đủ để tính nhãn / đếm Major (version cùng `version_type`). */
+export type VersionRevisionInfo = Pick<
+  DesignVersion,
+  'id' | 'versionNo' | 'revisionType'
+>;
 
 /**
  * Mỗi lần designer nộp bản vẽ, mỗi concept AI, mỗi lần lưu chỉnh sửa trên web. Không xóa.
@@ -146,4 +173,97 @@ export class DesignVersion {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
+
+  /**
+   * Nhãn hiển thị theo từng `version_type` (DB_CONTEXT §4.5): số chính = 1 + số bản `MAJOR` tính đến bản đó,
+   * số sau dấu chấm = số bản `MINOR` kể từ bản `MAJOR` gần nhất. `versions` cùng một `version_type`.
+   */
+  static labelsOf(
+    versions: readonly VersionRevisionInfo[],
+  ): Map<string, string> {
+    const labels = new Map<string, string>();
+    let major = 0;
+    let minor = 0;
+    [...versions]
+      .sort((a, b) => a.versionNo - b.versionNo)
+      .forEach((v, i) => {
+        if (i === 0 || v.revisionType === 'MAJOR') {
+          major += 1;
+          minor = 0;
+        } else {
+          minor += 1;
+        }
+        labels.set(v.id, minor ? `v${major}.${minor}` : `v${major}`);
+      });
+    return labels;
+  }
+
+  /**
+   * Tường (viền + đường tim, làm tròn mm) và cửa / cửa sổ (handle, block, vị trí, bề rộng) giữa 2 `scene_json` có khác không.
+   */
+  static compareScenes(
+    from: Record<string, unknown> | null,
+    to: Record<string, unknown> | null,
+  ): { wallsChanged: boolean; openingsChanged: boolean } {
+    const mm = (v: unknown): unknown =>
+      Array.isArray(v)
+        ? v.map(mm)
+        : typeof v === 'number'
+          ? Math.round(v * 1000)
+          : v && typeof v === 'object'
+            ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, mm(x)]))
+            : v;
+    const walls = (s: Record<string, unknown> | null) =>
+      JSON.stringify(mm([s?.walls ?? [], s?.wallSegments ?? []]));
+    const openings = (s: Record<string, unknown> | null) =>
+      JSON.stringify(
+        mm(
+          ((s?.openings ?? []) as Record<string, unknown>[])
+            .map((o) => [o.handle, o.blockName, o.x, o.y, o.width])
+            .sort((p, q) => String(p[0]).localeCompare(String(q[0]))),
+        ),
+      );
+    return {
+      wallsChanged: walls(from) !== walls(to),
+      openingsChanged: openings(from) !== openings(to),
+    };
+  }
+
+  /** Số bản `MAJOR` đã dùng (quy tắc 7; `MINOR` không tính). `versions` cùng một `version_type`. */
+  static countMajor(versions: readonly VersionRevisionInfo[]): number {
+    return versions.filter((v) => v.revisionType === 'MAJOR').length;
+  }
+
+  /** Đang chờ khách xem (bản mới nhất chưa bị thay, chưa duyệt). */
+  isAwaitingReview(): boolean {
+    return this.status === 'SUBMITTED' || this.status === 'REVISION_REQUESTED';
+  }
+
+  /** SUBMITTED → REVISION_REQUESTED; đã ở REVISION_REQUESTED thì giữ nguyên (khách gửi thêm yêu cầu). */
+  requestRevision(): void {
+    if (this.status === 'REVISION_REQUESTED') return;
+    this.transitionTo('REVISION_REQUESTED');
+  }
+
+  approve(at: Date): void {
+    this.transitionTo('APPROVED');
+    this.approvedAt = at;
+  }
+
+  /** Bản mới hơn thay bản này (upload bản sửa, hoặc khách duyệt một bản cũ hơn). */
+  supersede(): void {
+    if (this.status === 'SUPERSEDED') return;
+    this.transitionTo('SUPERSEDED');
+  }
+
+  private transitionTo(next: DesignVersionStatus): void {
+    if (!DESIGN_VERSION_STATUS_TRANSITIONS[this.status].includes(next)) {
+      throw new BusinessRuleError(
+        'INVALID_DESIGN_VERSION_STATUS_TRANSITION',
+        `Không thể chuyển version từ ${this.status} sang ${next}`,
+        { from: this.status, to: next },
+      );
+    }
+    this.status = next;
+  }
 }

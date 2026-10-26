@@ -5,6 +5,7 @@ import {
   Entity,
   JoinColumn,
   ManyToOne,
+  OneToOne,
   PrimaryGeneratedColumn,
   type Relation,
   Unique,
@@ -13,6 +14,56 @@ import { sqlIn } from '../../../database/postgres/sql-check.js';
 import { Room } from '../../apartments/entities/room.entity.js';
 import { ProductCategory } from '../../catalog/entities/product-category.entity.js';
 import { DesignVersion } from './design-version.entity.js';
+import { ProductSelection } from './product-selection.entity.js';
+
+/** Kết quả so kích thước sản phẩm với chỗ của món (chip Fits / Too long… của demo). */
+export const PRODUCT_FITS = [
+  'FITS',
+  'TOO_LONG',
+  'TOO_DEEP',
+  'TOO_TALL',
+  'UNKNOWN',
+] as const;
+export type ProductFit = (typeof PRODUCT_FITS)[number];
+
+/** Dung sai khi so kích thước (mm). */
+const FIT_TOLERANCE_MM = 20;
+/** Ngưỡng coi là dời chỗ / xoay (như Compare của demo): 1 mm, 0.5°. */
+const MOVE_EPS_M = 0.001;
+const ROTATE_EPS_DEG = 0.5;
+
+/** Món dùng để so 2 version (`productId` = sản phẩm đang chọn, null = chưa chọn). */
+export interface ComparableElement {
+  id: string;
+  dxfHandle: string | null;
+  blockName: string;
+  name: string;
+  position: ElementPosition | null;
+  overrides: Record<string, unknown> | null;
+  productId: string | null;
+}
+
+export interface ElementMove<T> {
+  from: T;
+  to: T;
+  /** Mét */
+  dx: number;
+  dy: number;
+  distance: number;
+  /** Độ, trong khoảng (-180, 180] */
+  rotationDeg: number;
+}
+
+export interface ElementComparison<T extends ComparableElement> {
+  added: T[];
+  removed: T[];
+  moved: ElementMove<T>[];
+  /** Đổi block trong DXF hoặc đổi sản phẩm đã chọn */
+  replaced: { from: T; to: T }[];
+  overridesChanged: { from: T; to: T }[];
+  /** Món không có handle, không ghép được giữa 2 version */
+  unmatched: T[];
+}
 
 /** Gán theo layer DXF: đồ nội thất → FURNITURE, đèn → LIGHTING, đồ treo tường → DECOR. */
 export const DESIGN_ELEMENT_TYPES = [
@@ -123,4 +174,112 @@ export class DesignElement {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
+
+  /** Sản phẩm đã chọn (Core 4); chỉ đọc, ghi qua `DesignVersionsRepository.createWithContent`. Chưa có = Not chosen. */
+  @OneToOne(() => ProductSelection, (selection) => selection.designElement)
+  selection?: Relation<ProductSelection> | null;
+
+  /**
+   * Sản phẩm có vừa chỗ của món không: dài / sâu so với khung món trong DXF (dung sai 20 mm),
+   * cao so với chiều cao tường. Thiếu kích thước để so → UNKNOWN.
+   */
+  static fitOf(
+    element: Pick<DesignElement, 'widthMm' | 'depthMm'>,
+    product: {
+      widthMm: number | null;
+      depthMm: number | null;
+      heightMm: number | null;
+    },
+    wallHeightMm: number | null,
+  ): ProductFit {
+    const over = (size: number | null, room: number | null) =>
+      size === null || room === null ? null : size > room + FIT_TOLERANCE_MM;
+    const checks: [boolean | null, ProductFit][] = [
+      [over(product.widthMm, element.widthMm), 'TOO_LONG'],
+      [over(product.depthMm, element.depthMm), 'TOO_DEEP'],
+      [
+        product.heightMm === null || wallHeightMm === null
+          ? null
+          : product.heightMm > wallHeightMm,
+        'TOO_TALL',
+      ],
+    ];
+    const failed = checks.find(([bad]) => bad === true);
+    if (failed) return failed[1];
+    return checks.some(([bad]) => bad === false) ? 'FITS' : 'UNKNOWN';
+  }
+
+  /**
+   * So 2 version cùng giai đoạn (logic Compare của demo): ghép món theo `dxf_handle`;
+   * thêm, xóa, dời (vị trí > 1 mm hoặc xoay > 0.5°), đổi mẫu (block khác hoặc sản phẩm chọn khác), đổi thuộc tính.
+   */
+  static compare<T extends ComparableElement>(
+    from: readonly T[],
+    to: readonly T[],
+  ): ElementComparison<T> {
+    const a = DesignElement.indexByHandle(from);
+    const b = DesignElement.indexByHandle(to);
+    const out: ElementComparison<T> = {
+      added: [],
+      removed: [],
+      moved: [],
+      replaced: [],
+      overridesChanged: [],
+      unmatched: [...from, ...to].filter((e) => e.dxfHandle === null),
+    };
+    for (const [handle, next] of b) {
+      const prev = a.get(handle);
+      if (!prev) {
+        out.added.push(next);
+        continue;
+      }
+      if (
+        prev.blockName !== next.blockName ||
+        prev.productId !== next.productId
+      ) {
+        out.replaced.push({ from: prev, to: next });
+      }
+      if (
+        JSON.stringify(prev.overrides ?? null) !==
+        JSON.stringify(next.overrides ?? null)
+      ) {
+        out.overridesChanged.push({ from: prev, to: next });
+      }
+      if (prev.position && next.position) {
+        const dx = next.position.x - prev.position.x;
+        const dy = next.position.y - prev.position.y;
+        const distance = Math.hypot(dx, dy);
+        let rotationDeg =
+          (next.position.rotation_deg - prev.position.rotation_deg) % 360;
+        if (rotationDeg > 180) rotationDeg -= 360;
+        if (rotationDeg <= -180) rotationDeg += 360;
+        if (distance > MOVE_EPS_M || Math.abs(rotationDeg) > ROTATE_EPS_DEG) {
+          out.moved.push({
+            from: prev,
+            to: next,
+            dx,
+            dy,
+            distance,
+            rotationDeg,
+          });
+        }
+      }
+    }
+    for (const [handle, prev] of a) if (!b.has(handle)) out.removed.push(prev);
+    return out;
+  }
+
+  /**
+   * `dxf_handle` → món: nhận lại cùng một món ở version khác (giữ `overrides`, chuyển comment, Compare).
+   * Món không có handle không nhận lại được nên bị bỏ qua.
+   */
+  static indexByHandle<T extends Pick<DesignElement, 'dxfHandle'>>(
+    elements: readonly T[],
+  ): Map<string, T> {
+    const index = new Map<string, T>();
+    for (const element of elements) {
+      if (element.dxfHandle !== null) index.set(element.dxfHandle, element);
+    }
+    return index;
+  }
 }

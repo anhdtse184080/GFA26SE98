@@ -153,6 +153,14 @@ export class CatalogService {
     return category;
   }
 
+  /** `code` → id của danh mục đang hoạt động (module designs gán danh mục cho món theo tên block). Không có → bỏ qua. */
+  async findActiveCategoryIdsByCodes(
+    codes: readonly string[],
+  ): Promise<Map<string, string>> {
+    const categories = await this.categories.findActiveByCodes(codes);
+    return new Map(categories.map((c) => [c.code, c.id]));
+  }
+
   // ---------- Private ----------
 
   private async getCategoryOrThrow(id: string): Promise<ProductCategory> {

@@ -225,6 +225,17 @@ export class ProductsService {
     return this.getProductOrThrow(id);
   }
 
+  /**
+   * `block_code` → `category_id` của sản phẩm (module designs: block DXF trùng mẫu thật thì món thuộc danh mục của mẫu đó).
+   * Không có sản phẩm → bỏ qua.
+   */
+  async findCategoryIdsByBlockCodes(
+    blockCodes: readonly string[],
+  ): Promise<Map<string, string>> {
+    const products = await this.products.findByBlockCodes(blockCodes);
+    return new Map(products.map((p) => [p.blockCode, p.categoryId]));
+  }
+
   // ---------- File sản phẩm ----------
 
   /**
@@ -283,6 +294,46 @@ export class ProductsService {
         'Chỉ Supplier chủ sản phẩm và Designer được tải model 3D',
       );
     }
+    return this.readFile(product, kind);
+  }
+
+  // ---------- Dùng chung với module designs ----------
+
+  /** Sản phẩm chọn được cho món (ACTIVE, supplier đang hợp tác) của một danh mục, rẻ trước; kèm supplier. */
+  searchChoosableByCategory(
+    categoryId: string,
+    page: PageRequest,
+  ): Promise<Paginated<Product>> {
+    return this.products.findChoosableByCategory(categoryId, page);
+  }
+
+  /** Sản phẩm chọn được theo id / `block_code`; không có hoặc đang ngừng bán → không có trong kết quả. */
+  findChoosable(filter: {
+    ids?: readonly string[];
+    blockCodes?: readonly string[];
+  }): Promise<Product[]> {
+    return this.products.findChoosable(filter);
+  }
+
+  /**
+   * File của sản phẩm (ảnh / model 3D .glb), **không kiểm role**: nơi gọi phải tự kiểm quyền
+   * (module designs cho mọi người xem được dự án tải file của sản phẩm đang chọn / lựa chọn của món).
+   * @throws NotFoundError `PRODUCT_NOT_FOUND` | `PRODUCT_FILE_NOT_FOUND`
+   */
+  async readProductFile(
+    productId: string,
+    kind: ProductFileKind,
+  ): Promise<ProductFile> {
+    return this.readFile(await this.getProductOrThrow(productId), kind);
+  }
+
+  // ---------- Private ----------
+
+  /** @throws NotFoundError `PRODUCT_FILE_NOT_FOUND` */
+  private async readFile(
+    product: Product,
+    kind: ProductFileKind,
+  ): Promise<ProductFile> {
     const key =
       kind === 'thumbnail' ? product.thumbnailKey : product.model3dKey;
     const data = key ? await this.storage.read(key) : null;
@@ -290,7 +341,7 @@ export class ProductsService {
       throw new NotFoundError(
         'PRODUCT_FILE_NOT_FOUND',
         'Sản phẩm chưa có file này',
-        { productId: id, kind },
+        { productId: product.id, kind },
       );
     }
     const ext = extensionOf(key);
@@ -300,8 +351,6 @@ export class ProductsService {
       fileName: `${product.sku}-${kind}.${ext}`,
     };
   }
-
-  // ---------- Private ----------
 
   /**
    * Lưu file mới lên storage (ngoài transaction) → ghi khóa vào DB → commit xong mới xóa file cũ.

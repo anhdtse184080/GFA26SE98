@@ -187,6 +187,16 @@ export class Project {
     this.transitionTo('CONTRACT_PENDING');
   }
 
+  /** IN_DESIGN → PRODUCT_SELECTION (khách duyệt mặt bằng 2D, sang Core 4). */
+  startProductSelection(): void {
+    this.transitionTo('PRODUCT_SELECTION');
+  }
+
+  /** PRODUCT_SELECTION → QUOTING (khách duyệt sản phẩm, sang Core 5). */
+  startQuoting(): void {
+    this.transitionTo('QUOTING');
+  }
+
   private transitionTo(next: ProjectStatus): void {
     if (!PROJECT_STATUS_TRANSITIONS[this.status].includes(next)) {
       throw new BusinessRuleError(

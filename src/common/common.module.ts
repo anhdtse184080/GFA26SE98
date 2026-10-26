@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { APP_FILTER, APP_PIPE } from '@nestjs/core';
 import type { EnvironmentVariables } from '../config/env.validation.js';
 import { BcryptPasswordHasher } from '../infrastructure/bcrypt-password-hasher.js';
+import { DxfCadFiles } from '../infrastructure/dxf-cad-files.js';
 import {
   decodeGcsCredentials,
   GcsFileStorage,
@@ -10,6 +11,7 @@ import {
 import { createMailer } from '../infrastructure/mail/create-mailer.js';
 import { SystemClock } from '../infrastructure/system-clock.js';
 import { DomainExceptionFilter } from './filters/domain-exception.filter.js';
+import { CAD_FILES } from './ports/cad-files.js';
 import { CLOCK } from './ports/clock.js';
 import { FILE_STORAGE } from './ports/file-storage.js';
 import { MAILER } from './ports/mailer.js';
@@ -47,9 +49,10 @@ import { createValidationPipe } from './validation/validation.pipe.js';
           )!,
         ),
     },
+    { provide: CAD_FILES, useClass: DxfCadFiles },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },
     { provide: APP_PIPE, useFactory: createValidationPipe },
   ],
-  exports: [PASSWORD_HASHER, CLOCK, MAILER, FILE_STORAGE],
+  exports: [PASSWORD_HASHER, CLOCK, MAILER, FILE_STORAGE, CAD_FILES],
 })
 export class CommonModule {}
