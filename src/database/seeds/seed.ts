@@ -1,6 +1,6 @@
-import { type DataSource, type EntityManager, In } from 'typeorm';
+import type { DataSource, EntityManager } from 'typeorm';
 import type { PasswordHasher } from '../../common/ports/password-hasher.js';
-import { ProductCategory } from '../../modules/catalog/entities/product-category.entity.js';
+import type { CostCategory } from '../../modules/catalog/entities/product-category.entity.js';
 import { DesignStyle } from '../../modules/design-styles/entities/design-style.entity.js';
 import { DesignerProfile } from '../../modules/users/entities/designer-profile.entity.js';
 import { Role } from '../../modules/users/entities/role.entity.js';
@@ -35,7 +35,7 @@ export interface DemoUserResult {
 export interface CatalogSeedResult {
   /** Số bản ghi mới tạo (đã có thì bỏ qua). */
   stylesCreated: number;
-  /** Danh mục mẫu của supplier demo (0 ở production). */
+  /** Danh mục sản phẩm dùng chung (24 danh mục chuẩn). */
   categoriesCreated: number;
 }
 
@@ -85,8 +85,8 @@ const DEMO_USERS: readonly DemoUser[] = [
  * (đã tồn tại thì giữ nguyên, không ghi đè mật khẩu). Ngoài production còn tạo
  * 1 tài khoản demo ACTIVE (có mật khẩu, đăng nhập được ngay) cho mỗi role
  * STAFF/DESIGNER/SUPPLIER/CUSTOMER, kèm profile — ngoại lệ có chủ đích so với DB_CONTEXT §6.1.
- * Danh mục: luôn thêm 6 phong cách thiết kế; ngoài production thêm cây danh mục sản phẩm mẫu
- * cho supplier demo (danh mục riêng từng supplier). Đã có `code` thì bỏ qua, không ghi đè.
+ * Danh mục: luôn thêm 6 phong cách thiết kế và 24 danh mục sản phẩm dùng chung (DB_CONTEXT §4.6).
+ * Đã có `code` thì bỏ qua, không ghi đè (danh mục chỉ điền cột đang trống).
  *
  * Ngoại lệ có chủ đích của ARCHITECTURE §4–5: script CLI chạy ngoài Nest DI nên dùng
  * thẳng `DataSource`/QueryBuilder thay vì repository + UnitOfWork. Code trong app không làm vậy.
@@ -126,7 +126,7 @@ export async function seedDatabase(
     await manager.getRepository(Role).upsert(roles, ['id']);
     const catalog: CatalogSeedResult = {
       stylesCreated: await insertDesignStyles(manager),
-      categoriesCreated: 0,
+      categoriesCreated: await insertProductCategories(manager),
     };
 
     const adminCreated =
@@ -162,18 +162,6 @@ export async function seedDatabase(
             });
       if (userId !== null) {
         await insertProfile(manager, demo.role, userId);
-      }
-      if (demo.role === 'SUPPLIER') {
-        const supplier = await manager.getRepository(SupplierProfile).findOne({
-          where: { user: { email: demo.email } },
-          select: { userId: true },
-        });
-        if (supplier) {
-          catalog.categoriesCreated = await insertProductCategories(
-            manager,
-            supplier.userId,
-          );
-        }
       }
       demoUsers.push({
         role: demo.role,
@@ -277,27 +265,43 @@ const DESIGN_STYLES = [
   },
 ] as const;
 
-/** Danh mục gốc → danh mục con. */
-const PRODUCT_CATEGORY_TREE: ReadonlyArray<{
+/** 24 danh mục dùng chung (DB_CONTEXT §4.6), khớp 23 model minh họa `ph-*.glb`; `OTHER` không có model. */
+const PRODUCT_CATEGORIES: ReadonlyArray<{
   code: string;
   name: string;
-  children: ReadonlyArray<{ code: string; name: string }>;
+  costCategory: CostCategory;
 }> = [
-  {
-    code: 'FURNITURE',
-    name: 'Nội thất',
-    children: [
-      { code: 'SOFA', name: 'Sofa' },
-      { code: 'TABLE', name: 'Bàn' },
-      { code: 'BED', name: 'Giường' },
-      { code: 'CABINET', name: 'Tủ' },
-    ],
-  },
-  { code: 'LIGHTING', name: 'Chiếu sáng', children: [] },
-  { code: 'DECOR', name: 'Trang trí', children: [] },
-  { code: 'APPLIANCE', name: 'Thiết bị', children: [] },
-  { code: 'FINISH_MATERIAL', name: 'Vật liệu hoàn thiện', children: [] },
+  { code: 'SOFA', name: 'Sofa', costCategory: 'FURNITURE' },
+  { code: 'ARMCHAIR', name: 'Ghế bành', costCategory: 'FURNITURE' },
+  { code: 'COFFEE_TABLE', name: 'Bàn trà', costCategory: 'FURNITURE' },
+  { code: 'TV_CONSOLE', name: 'Kệ TV', costCategory: 'FURNITURE' },
+  { code: 'BED', name: 'Giường', costCategory: 'FURNITURE' },
+  { code: 'NIGHTSTAND', name: 'Tủ đầu giường', costCategory: 'FURNITURE' },
+  { code: 'WARDROBE', name: 'Tủ áo', costCategory: 'FURNITURE' },
+  { code: 'DRAWER', name: 'Tủ ngăn kéo', costCategory: 'FURNITURE' },
+  { code: 'DESK', name: 'Bàn làm việc', costCategory: 'FURNITURE' },
+  { code: 'DINING_TABLE', name: 'Bàn ăn', costCategory: 'FURNITURE' },
+  { code: 'DINING_CHAIR', name: 'Ghế ăn', costCategory: 'FURNITURE' },
+  { code: 'KITCHEN_BASE', name: 'Tủ bếp dưới', costCategory: 'FURNITURE' },
+  { code: 'KITCHEN_WALL', name: 'Tủ bếp trên', costCategory: 'FURNITURE' },
+  { code: 'KITCHEN_COUNTER', name: 'Mặt bếp', costCategory: 'FURNITURE' },
+  { code: 'DOWNLIGHT', name: 'Đèn âm trần', costCategory: 'LIGHTING' },
+  { code: 'PENDANT_LIGHT', name: 'Đèn thả', costCategory: 'LIGHTING' },
+  { code: 'WALL_LIGHT', name: 'Đèn tường', costCategory: 'LIGHTING' },
+  { code: 'PICTURE', name: 'Tranh', costCategory: 'DECOR' },
+  { code: 'PLANT', name: 'Cây cảnh', costCategory: 'DECOR' },
+  { code: 'BASIN', name: 'Lavabo', costCategory: 'FINISHING' },
+  { code: 'SHOWER', name: 'Sen tắm', costCategory: 'FINISHING' },
+  { code: 'TOILET', name: 'Bồn cầu', costCategory: 'FINISHING' },
+  { code: 'TV', name: 'Tivi', costCategory: 'OTHER' },
+  { code: 'OTHER', name: 'Khác', costCategory: 'OTHER' },
 ];
+
+/** Đường dẫn tạm của model minh họa (đổi khi chốt kho file), vd `KITCHEN_BASE` → `ph-kitchen-base.glb`. */
+function placeholderModelUrl(code: string): string | null {
+  if (code === 'OTHER') return null;
+  return `/models/placeholders/ph-${code.toLowerCase().replaceAll('_', '-')}.glb`;
+}
 
 /** Thêm style chưa có (theo `code`), không ghi đè style đã sửa. Trả số style mới tạo. */
 async function insertDesignStyles(manager: EntityManager): Promise<number> {
@@ -312,53 +316,28 @@ async function insertDesignStyles(manager: EntityManager): Promise<number> {
   return (result.raw as unknown[]).length;
 }
 
-/** Thêm danh mục mẫu cho supplier (bỏ qua `code` đã có trong catalog của supplier). Trả số danh mục mới tạo. */
+/**
+ * Thêm danh mục chuẩn chưa có (theo `code`). Đã có thì chỉ điền `cost_category` / `default_model_url` đang trống,
+ * không ghi đè tên hay giá trị Admin đã sửa. Trả số danh mục mới tạo.
+ */
 async function insertProductCategories(
   manager: EntityManager,
-  supplierId: string,
 ): Promise<number> {
-  const repo = manager.getRepository(ProductCategory);
-  const insert = async (
-    values: Pick<
-      ProductCategory,
-      'supplierId' | 'code' | 'name' | 'parentId' | 'isActive'
-    >[],
-  ): Promise<number> => {
-    const result = await repo
-      .createQueryBuilder()
-      .insert()
-      .values(values)
-      .orIgnore()
-      .returning(['id'])
-      .execute();
-    return (result.raw as unknown[]).length;
-  };
-
-  let created = await insert(
-    PRODUCT_CATEGORY_TREE.map((c) => ({
-      supplierId,
-      code: c.code,
-      name: c.name,
-      parentId: null,
-      isActive: true,
-    })),
+  const rows: { inserted: boolean }[] = await manager.query(
+    `INSERT INTO product_categories (code, name, cost_category, default_model_url, is_active)
+     SELECT code, name, cost_category, default_model_url, true
+     FROM unnest($1::varchar[], $2::varchar[], $3::varchar[], $4::varchar[])
+       AS t(code, name, cost_category, default_model_url)
+     ON CONFLICT (code) DO UPDATE SET
+       cost_category = COALESCE(product_categories.cost_category, EXCLUDED.cost_category),
+       default_model_url = COALESCE(product_categories.default_model_url, EXCLUDED.default_model_url)
+     RETURNING (xmax = 0) AS inserted`,
+    [
+      PRODUCT_CATEGORIES.map((c) => c.code),
+      PRODUCT_CATEGORIES.map((c) => c.name),
+      PRODUCT_CATEGORIES.map((c) => c.costCategory),
+      PRODUCT_CATEGORIES.map((c) => placeholderModelUrl(c.code)),
+    ],
   );
-  const roots = await repo.find({
-    where: {
-      supplierId,
-      code: In(PRODUCT_CATEGORY_TREE.map((c) => c.code)),
-    },
-  });
-  const rootIdByCode = new Map(roots.map((r) => [r.code, r.id]));
-  const children = PRODUCT_CATEGORY_TREE.flatMap((root) =>
-    root.children.map((child) => ({
-      supplierId,
-      code: child.code,
-      name: child.name,
-      parentId: rootIdByCode.get(root.code) ?? null,
-      isActive: true,
-    })),
-  );
-  if (children.length > 0) created += await insert(children);
-  return created;
+  return rows.filter((row) => row.inserted).length;
 }

@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -17,22 +18,15 @@ import {
   trim,
   trimUpperCase,
 } from '../../../common/validation/transforms.js';
+import {
+  COST_CATEGORIES,
+  type CostCategory,
+} from '../entities/product-category.entity.js';
 
-export class ListCategoriesQueryDto {
-  /** Lọc theo trạng thái; bỏ trống = tất cả */
-  @IsOptional()
-  @Transform(toBoolean)
-  @IsBoolean()
-  isActive?: boolean;
-}
+/** `code` + `-NNNN` (block_code của sản phẩm) phải vừa `products.block_code` VARCHAR(50). */
+const CATEGORY_CODE_MAX_LENGTH = 44;
 
-/** Admin xem danh mục của mọi supplier. */
 export class AdminListCategoriesQueryDto extends PaginationQueryDto {
-  /** `user_id` của supplier */
-  @IsOptional()
-  @IsUUID()
-  supplierId?: string;
-
   @IsOptional()
   @Transform(toBoolean)
   @IsBoolean()
@@ -47,19 +41,19 @@ export class AdminListCategoriesQueryDto extends PaginationQueryDto {
 }
 
 export class CreateCategoryDto {
-  /** Danh mục cha (phải thuộc catalog của bạn); bỏ trống = danh mục gốc */
+  /** Danh mục cha; bỏ trống = danh mục gốc */
   @IsOptional()
   @IsUUID()
   parentId?: string;
 
   /**
-   * Mã duy nhất trong catalog của bạn (tự viết hoa)
+   * Mã duy nhất toàn hệ thống (tự viết hoa), không đổi được về sau; là tiền tố `blockCode` của sản phẩm
    * @example SOFA
    */
   @Transform(trimUpperCase)
   @IsString()
   @Matches(CODE_PATTERN, { message: CODE_MESSAGE })
-  @MaxLength(50)
+  @MaxLength(CATEGORY_CODE_MAX_LENGTH)
   code: string;
 
   /** @example Sofa */
@@ -73,9 +67,25 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  /**
+   * Model minh họa (.glb) khi món chưa có sản phẩm thật
+   * @example /models/placeholders/ph-sofa.glb
+   */
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  defaultModelUrl?: string;
+
+  /** Nhóm dự toán */
+  @IsOptional()
+  @IsIn(COST_CATEGORIES)
+  costCategory?: CostCategory;
 }
 
-/** PATCH: bỏ field = giữ nguyên. `parentId: null` = chuyển thành danh mục gốc. Không đổi `code`. */
+/** PATCH: bỏ field = giữ nguyên. `null` = xóa (parentId: thành danh mục gốc). Không đổi `code`. */
 export class UpdateCategoryDto {
   /** Không được là chính nó hoặc danh mục con cháu của nó (→ 422 CATEGORY_CYCLE) */
   @IsOptional()
@@ -94,4 +104,15 @@ export class UpdateCategoryDto {
   @IsOptionalNotNull()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  defaultModelUrl?: string | null;
+
+  @IsOptional()
+  @IsIn(COST_CATEGORIES)
+  costCategory?: CostCategory | null;
 }

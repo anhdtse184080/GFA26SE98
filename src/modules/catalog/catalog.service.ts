@@ -22,7 +22,7 @@ import {
   ProductCategoriesRepository,
 } from './product-categories.repository.js';
 
-export type CreateCategoryInput = Omit<NewProductCategory, 'supplierId'>;
+export type CreateCategoryInput = NewProductCategory;
 
 export interface UpdateCategoryInput extends ProductCategoryPatch {
   /** `undefined` = giữ nguyên, `null` = thành danh mục gốc. */
@@ -30,9 +30,9 @@ export interface UpdateCategoryInput extends ProductCategoryPatch {
 }
 
 /**
- * Danh mục sản phẩm dạng cây, **riêng của từng supplier**: Supplier tạo/sửa/ẩn và xem của mình;
- * Admin xem của mọi supplier. Không xóa: ẩn bằng `is_active`.
- * Module `products` dùng `getActiveSupplierId`, `assertUsableCategory` khi ghi sản phẩm.
+ * Danh mục sản phẩm **dùng chung** dạng cây: chỉ Admin tạo/sửa/ẩn; Supplier, Designer, Staff xem danh mục
+ * đang hoạt động để chọn. Không xóa: ẩn bằng `is_active`.
+ * Module `products` dùng `getActiveSupplierId`, `getUsableCategoryForUpdate` khi ghi sản phẩm.
  */
 @Injectable()
 export class CatalogService {
@@ -44,15 +44,12 @@ export class CatalogService {
 
   // ---------- Danh mục ----------
 
-  /** Danh mục của supplier đang đăng nhập (phẳng, kèm `parentId`). */
-  listOwnCategories(
-    actor: AuthUser,
-    isActive?: boolean,
-  ): Promise<ProductCategory[]> {
-    return this.categories.findAllBySupplier(actor.id, isActive);
+  /** Danh mục đang hoạt động (phẳng, kèm `parentId`), để chọn khi tạo sản phẩm / đổi mẫu. */
+  listActiveCategories(): Promise<ProductCategory[]> {
+    return this.categories.findAll(true);
   }
 
-  /** Admin: danh mục của mọi supplier, lọc theo supplier/trạng thái/từ khóa, có phân trang. */
+  /** Admin: mọi danh mục, lọc theo trạng thái/từ khóa, có phân trang. */
   searchCategories(
     filter: CategorySearchFilter,
     page: PageRequest,
@@ -60,68 +57,51 @@ export class CatalogService {
     return this.categories.search(filter, page);
   }
 
-  /**
-   * SUPPLIER chỉ xem danh mục của mình; ADMIN xem tất cả.
-   * @throws NotFoundError `CATEGORY_NOT_FOUND` (cả khi không phải danh mục của supplier)
-   */
-  async getCategory(id: string, actor: AuthUser): Promise<ProductCategory> {
-    const category = await this.getCategoryOrThrow(id);
-    if (actor.role !== 'ADMIN' && category.supplierId !== actor.id) {
-      throw this.categoryNotFound(id);
-    }
-    return category;
-  }
-
-  /**
-   * @throws BusinessRuleError `SUPPLIER_NOT_ACTIVE`
-   * @throws NotFoundError `CATEGORY_NOT_FOUND` (danh mục cha không có hoặc của supplier khác)
-   * @throws ConflictError `CATEGORY_CODE_EXISTS`
-   */
-  async createCategory(
-    actor: AuthUser,
-    input: CreateCategoryInput,
-  ): Promise<ProductCategory> {
-    const id = await this.uow.run(async () => {
-      const supplierId = await this.getActiveSupplierId(actor);
-      if (input.parentId !== null) {
-        await this.getOwnCategory(input.parentId, supplierId);
-      }
-      const category = await this.categories.createIfCodeAvailable({
-        ...input,
-        supplierId,
-      });
-      if (!category) {
-        throw new ConflictError(
-          'CATEGORY_CODE_EXISTS',
-          'Mã danh mục đã tồn tại trong catalog của bạn',
-          { code: input.code },
-        );
-      }
-      return category.id;
-    });
+  /** @throws NotFoundError `CATEGORY_NOT_FOUND` */
+  getCategory(id: string): Promise<ProductCategory> {
     return this.getCategoryOrThrow(id);
   }
 
   /**
-   * @throws BusinessRuleError `SUPPLIER_NOT_ACTIVE` | `CATEGORY_CYCLE`
+   * @throws NotFoundError `CATEGORY_NOT_FOUND` (danh mục cha không có)
+   * @throws ConflictError `CATEGORY_CODE_EXISTS`
+   */
+  async createCategory(input: CreateCategoryInput): Promise<ProductCategory> {
+    return this.uow.run(async () => {
+      if (input.parentId !== null) {
+        await this.getCategoryOrThrow(input.parentId);
+      }
+      const category = await this.categories.createIfCodeAvailable(input);
+      if (!category) {
+        throw new ConflictError(
+          'CATEGORY_CODE_EXISTS',
+          'Mã danh mục đã tồn tại',
+          { code: input.code },
+        );
+      }
+      return category;
+    });
+  }
+
+  /**
+   * @throws BusinessRuleError `CATEGORY_CYCLE`
    * @throws NotFoundError `CATEGORY_NOT_FOUND`
    */
   async updateCategory(
     id: string,
-    actor: AuthUser,
     input: UpdateCategoryInput,
   ): Promise<ProductCategory> {
     return this.uow.run(async () => {
-      const supplierId = await this.getActiveSupplierId(actor);
-      const category = await this.getOwnCategory(id, supplierId);
-      if (input.parentId !== undefined) {
-        if (input.parentId !== null) {
-          await this.getOwnCategory(input.parentId, supplierId);
-          await this.assertNoCycle(id, input.parentId);
+      const category = await this.getCategoryOrThrow(id);
+      const { parentId, ...patch } = input;
+      if (parentId !== undefined) {
+        if (parentId !== null) {
+          await this.getCategoryOrThrow(parentId);
+          await this.assertNoCycle(id, parentId);
         }
-        category.moveTo(input.parentId);
+        category.moveTo(parentId);
       }
-      category.update({ name: input.name, isActive: input.isActive });
+      category.update(patch);
       return this.categories.save(category);
     });
   }
@@ -129,7 +109,7 @@ export class CatalogService {
   // ---------- Dùng chung với module products ----------
 
   /**
-   * Supplier đang hợp tác (`partnership_status = ACTIVE`) mới được ghi catalog (danh mục, sản phẩm). `users.status` do JwtAuthGuard kiểm tra.
+   * Supplier đang hợp tác (`partnership_status = ACTIVE`) mới được ghi sản phẩm. `users.status` do JwtAuthGuard kiểm tra.
    * @throws ForbiddenError `SUPPLIER_PROFILE_MISSING`
    * @throws BusinessRuleError `SUPPLIER_NOT_ACTIVE`
    */
@@ -153,15 +133,16 @@ export class CatalogService {
   }
 
   /**
-   * Danh mục của sản phẩm phải thuộc catalog của supplier và đang hoạt động.
+   * Danh mục của sản phẩm phải tồn tại và đang hoạt động. Khóa dòng danh mục đến hết transaction
+   * (gọi bên trong `UnitOfWork.run`) để đánh số `block_code` tuần tự.
    * @throws NotFoundError `CATEGORY_NOT_FOUND`
    * @throws BusinessRuleError `CATEGORY_INACTIVE`
    */
-  async assertUsableCategory(
+  async getUsableCategoryForUpdate(
     categoryId: string,
-    supplierId: string,
-  ): Promise<void> {
-    const category = await this.getOwnCategory(categoryId, supplierId);
+  ): Promise<ProductCategory> {
+    const category = await this.categories.findByIdForUpdate(categoryId);
+    if (!category) throw this.categoryNotFound(categoryId);
     if (!category.isActive) {
       throw new BusinessRuleError(
         'CATEGORY_INACTIVE',
@@ -169,6 +150,7 @@ export class CatalogService {
         { categoryId },
       );
     }
+    return category;
   }
 
   // ---------- Private ----------
@@ -176,16 +158,6 @@ export class CatalogService {
   private async getCategoryOrThrow(id: string): Promise<ProductCategory> {
     const category = await this.categories.findById(id);
     if (!category) throw this.categoryNotFound(id);
-    return category;
-  }
-
-  /** @throws NotFoundError `CATEGORY_NOT_FOUND` (không có hoặc của supplier khác) */
-  private async getOwnCategory(
-    id: string,
-    supplierId: string,
-  ): Promise<ProductCategory> {
-    const category = await this.getCategoryOrThrow(id);
-    if (category.supplierId !== supplierId) throw this.categoryNotFound(id);
     return category;
   }
 

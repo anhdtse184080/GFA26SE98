@@ -9,32 +9,35 @@ import {
   type Relation,
   Unique,
 } from 'typeorm';
-import { SupplierProfile } from '../../users/entities/supplier-profile.entity.js';
+import { sqlIn } from '../../../database/postgres/sql-check.js';
+
+/** Nhóm dự toán, khớp `quotation_items.cost_category`. */
+export const COST_CATEGORIES = [
+  'FURNITURE',
+  'FINISHING',
+  'LIGHTING',
+  'DECOR',
+  'OTHER',
+] as const;
+export type CostCategory = (typeof COST_CATEGORIES)[number];
 
 /**
- * Danh mục sản phẩm dạng cây (`parent_id`), **riêng của từng supplier**: `code` duy nhất trong phạm vi supplier,
- * danh mục cha phải cùng supplier. Không xóa: ẩn bằng `is_active`.
+ * Danh mục sản phẩm **dùng chung** dạng cây (`parent_id`), chỉ Admin tạo/sửa; supplier chọn danh mục khi tạo sản phẩm.
+ * `code` duy nhất toàn bảng, không đổi (là tiền tố `products.block_code`, tên block model minh họa trong DXF).
+ * Không xóa: ẩn bằng `is_active`.
  */
 @Entity({ name: 'product_categories' })
-@Unique('uq_product_categories_supplier_id_code', ['supplierId', 'code'])
+@Unique('uq_product_categories_code', ['code'])
 @Check('chk_product_categories_parent_id', '"parent_id" <> "id"')
+@Check(
+  'chk_product_categories_cost_category',
+  sqlIn('cost_category', COST_CATEGORIES),
+)
 export class ProductCategory {
   @PrimaryGeneratedColumn('uuid', {
     primaryKeyConstraintName: 'pk_product_categories',
   })
   id: string;
-
-  @Column({ name: 'supplier_id', type: 'uuid' })
-  supplierId: string;
-
-  /** Chỉ đọc (lấy `company_name` cho Admin); không ghi `supplier_profiles` qua quan hệ này. */
-  @ManyToOne(() => SupplierProfile, { nullable: false })
-  @JoinColumn({
-    name: 'supplier_id',
-    referencedColumnName: 'userId',
-    foreignKeyConstraintName: 'fk_product_categories_supplier_id',
-  })
-  supplier?: Relation<SupplierProfile>;
 
   @Index('idx_product_categories_parent_id')
   @Column({ name: 'parent_id', type: 'uuid', nullable: true })
@@ -56,7 +59,24 @@ export class ProductCategory {
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 
-  /** `undefined` = giữ nguyên. Không đổi `code`, `supplier_id`; đổi `parentId` qua `moveTo` (service kiểm tra trước). */
+  /** Model minh họa (.glb) dùng khi món chưa có sản phẩm thật; đường dẫn tĩnh, không phải khóa FileStorage. */
+  @Column({
+    name: 'default_model_url',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
+  defaultModelUrl: string | null;
+
+  @Column({
+    name: 'cost_category',
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+  })
+  costCategory: CostCategory | null;
+
+  /** `undefined` = giữ nguyên, `null` = xóa (cột nullable). Không đổi `code`; đổi `parentId` qua `moveTo` (service kiểm tra trước). */
   update(patch: ProductCategoryPatch): void {
     for (const [key, value] of Object.entries(patch)) {
       if (value !== undefined) Object.assign(this, { [key]: value });
@@ -71,5 +91,8 @@ export class ProductCategory {
 }
 
 export type ProductCategoryPatch = Partial<
-  Pick<ProductCategory, 'name' | 'isActive'>
+  Pick<
+    ProductCategory,
+    'name' | 'isActive' | 'defaultModelUrl' | 'costCategory'
+  >
 >;

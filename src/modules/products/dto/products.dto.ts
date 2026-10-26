@@ -86,14 +86,17 @@ export class ListProductsQueryDto extends PaginationQueryDto {
   status?: ProductStatus;
 }
 
-/** Ảnh / model 3D không nhập ở đây: upload qua `PUT /products/:id/thumbnail`, `PUT /products/:id/model-3d`. */
+/**
+ * Ảnh / model 3D không nhập ở đây: upload qua `PUT /products/:id/thumbnail`, `PUT /products/:id/model-3d`.
+ * `blockCode` do hệ thống tự sinh, không nhận từ request.
+ */
 export class CreateProductDto {
-  /** Danh mục đang hoạt động trong catalog của bạn */
+  /** Danh mục dùng chung đang hoạt động (`GET /product-categories`) */
   @IsUUID()
   categoryId: string;
 
   /**
-   * Duy nhất trong catalog của bạn
+   * Mã hàng của bạn, duy nhất trong các sản phẩm của bạn
    * @example SOFA-JP-001
    */
   @Transform(trim)

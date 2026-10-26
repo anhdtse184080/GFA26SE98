@@ -28,6 +28,8 @@ export class ProductStyleRefDto {
 export class ProductResponseDto {
   id: string;
   sku: string;
+  /** Tên block trong DXF, hệ thống tự sinh (vd "SOFA-0007"), không đổi */
+  blockCode: string;
   name: string;
   description: string | null;
   brand: string | null;
@@ -63,6 +65,7 @@ export class ProductResponseDto {
     return Object.assign(new ProductResponseDto(), {
       id: product.id,
       sku: product.sku,
+      blockCode: product.blockCode,
       name: product.name,
       description: product.description,
       brand: product.brand,

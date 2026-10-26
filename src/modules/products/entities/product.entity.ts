@@ -41,11 +41,13 @@ export const PRODUCT_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
 
 /**
- * Sản phẩm của supplier đối tác. `sku` duy nhất trong phạm vi supplier; `category_id` thuộc catalog của chính supplier.
+ * Sản phẩm của supplier đối tác. `sku` duy nhất trong phạm vi supplier; `category_id` là một danh mục dùng chung (Admin tạo).
+ * `block_code` duy nhất toàn bảng, hệ thống tự sinh lúc tạo, không đổi về sau.
  * Giá chính thức luôn đọc từ bảng này. Không xóa: ngừng bán bằng `status = INACTIVE`.
  */
 @Entity({ name: 'products' })
 @Unique('uq_products_supplier_id_sku', ['supplierId', 'sku'])
+@Unique('uq_products_block_code', ['blockCode'])
 @Index('idx_products_category_id', ['categoryId'])
 @Check('chk_products_unit', sqlIn('unit', PRODUCT_UNITS))
 @Check('chk_products_stock_status', sqlIn('stock_status', STOCK_STATUSES))
@@ -80,6 +82,13 @@ export class Product {
 
   @Column({ name: 'sku', type: 'varchar', length: 50 })
   sku: string;
+
+  /**
+   * Tên block trong DXF: `<code danh mục>-<số thứ tự 4 chữ số>` (vd `SOFA-0007`). Gán một lần qua `assignBlockCode`;
+   * đổi danh mục không đổi mã này.
+   */
+  @Column({ name: 'block_code', type: 'varchar', length: 50 })
+  blockCode: string;
 
   @Column({ name: 'name', type: 'varchar', length: 255 })
   name: string;
@@ -174,7 +183,15 @@ export class Product {
     this.priceUpdatedAt = at;
   }
 
-  /** Danh mục mới phải đã được service kiểm tra (cùng supplier, đang active). */
+  /** Chỉ khi tạo sản phẩm; `seq` do service tính (lớn nhất hiện có của tiền tố + 1). */
+  assignBlockCode(categoryCode: string, seq: number): void {
+    if (this.blockCode !== undefined) {
+      throw new Error('block_code đã được gán, không đổi được');
+    }
+    this.blockCode = `${categoryCode}-${String(seq).padStart(4, '0')}`;
+  }
+
+  /** Danh mục mới phải đã được service kiểm tra (tồn tại, đang active). Không đổi `block_code`. */
   moveToCategory(categoryId: string): void {
     this.categoryId = categoryId;
     this.category = undefined;

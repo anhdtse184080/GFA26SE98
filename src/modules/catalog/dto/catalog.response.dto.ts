@@ -1,5 +1,8 @@
 import type { Paginated } from '../../../common/pagination/paginated.js';
-import type { ProductCategory } from '../entities/product-category.entity.js';
+import type {
+  CostCategory,
+  ProductCategory,
+} from '../entities/product-category.entity.js';
 
 export class CategoryResponseDto {
   id: string;
@@ -7,6 +10,9 @@ export class CategoryResponseDto {
   code: string;
   name: string;
   isActive: boolean;
+  /** Model minh họa (.glb) khi món chưa có sản phẩm thật */
+  defaultModelUrl: string | null;
+  costCategory: CostCategory | null;
 
   static from(category: ProductCategory): CategoryResponseDto {
     return Object.assign(new CategoryResponseDto(), {
@@ -15,41 +21,21 @@ export class CategoryResponseDto {
       code: category.code,
       name: category.name,
       isActive: category.isActive,
+      defaultModelUrl: category.defaultModelUrl,
+      costCategory: category.costCategory,
     });
   }
 }
 
-export class CategorySupplierDto {
-  /** `user_id` của supplier */
-  id: string;
-  companyName: string;
-}
-
-/** Danh mục kèm supplier sở hữu (Admin). */
-export class AdminCategoryResponseDto extends CategoryResponseDto {
-  supplier: CategorySupplierDto;
-
-  /** `category` phải được tải kèm `supplier`. */
-  static from(category: ProductCategory): AdminCategoryResponseDto {
-    const supplier = category.supplier;
-    if (!supplier) throw new Error('Category must be loaded with supplier');
-    return Object.assign(
-      new AdminCategoryResponseDto(),
-      CategoryResponseDto.from(category),
-      { supplier: { id: supplier.userId, companyName: supplier.companyName } },
-    );
-  }
-}
-
-export class AdminCategoryPageResponseDto {
-  items: AdminCategoryResponseDto[];
+export class CategoryPageResponseDto {
+  items: CategoryResponseDto[];
   page: number;
   limit: number;
   total: number;
 
-  static from(page: Paginated<ProductCategory>): AdminCategoryPageResponseDto {
-    return Object.assign(new AdminCategoryPageResponseDto(), {
-      items: page.items.map((c) => AdminCategoryResponseDto.from(c)),
+  static from(page: Paginated<ProductCategory>): CategoryPageResponseDto {
+    return Object.assign(new CategoryPageResponseDto(), {
+      items: page.items.map((c) => CategoryResponseDto.from(c)),
       page: page.page,
       limit: page.limit,
       total: page.total,

@@ -55,6 +55,18 @@ export class ProductsRepository {
     });
   }
 
+  /** Số thứ tự lớn nhất trong các `block_code` dạng `<prefix>-<số>`; chưa có → 0. */
+  async findLastBlockCodeSeq(prefix: string): Promise<number> {
+    const rows: { seq: number | null }[] = await this.tx.manager.query(
+      `SELECT max(substring(block_code FROM length($1) + 2)::int) AS seq
+       FROM products
+       WHERE left(block_code, length($1) + 1) = $1 || '-'
+         AND substring(block_code FROM length($1) + 2) ~ '^[0-9]+$'`,
+      [prefix],
+    );
+    return rows[0]?.seq ?? 0;
+  }
+
   /** Chỉ ghi khóa file (`thumbnail_url`, `model_3d_url`) và `updated_at`. */
   async saveFileKeys(product: Product): Promise<void> {
     await this.repo.update(

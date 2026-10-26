@@ -106,7 +106,8 @@ export function invalidModelFile(
  * Sản phẩm của supplier đối tác (`products`, `product_styles`):
  * - Supplier tạo/sửa/xem của mình (mọi status); Designer/Staff chỉ xem sản phẩm ACTIVE của supplier
  *   đang hợp tác (chọn đồ ở Core Flow 4); Admin xem tất cả. Không xóa: ngừng bán bằng `status = INACTIVE`.
- * - Danh mục và điều kiện supplier đang hợp tác kiểm tra qua `CatalogService`.
+ * - Danh mục (dùng chung, Admin tạo) và điều kiện supplier đang hợp tác kiểm tra qua `CatalogService`.
+ * - `block_code` hệ thống tự sinh lúc tạo (`<code danh mục>-<4 chữ số>`), không nhận từ request, không sửa được.
  * - File sản phẩm (ảnh, model 3D .glb): DB chỉ lưu khóa trên FileStorage; tải qua API có kiểm tra quyền.
  */
 @Injectable()
@@ -171,12 +172,16 @@ export class ProductsService {
     const id = await this.uow.run(async () => {
       const supplierId = await this.catalog.getActiveSupplierId(actor);
       const { categoryId, price, styleIds, ...fields } = input;
-      await this.catalog.assertUsableCategory(categoryId, supplierId);
+      // Khóa dòng danh mục đến hết transaction → hai lượt tạo cùng danh mục không lấy trùng số block_code.
+      const category =
+        await this.catalog.getUsableCategoryForUpdate(categoryId);
       await this.assertActiveStyles(styleIds);
       const product = Object.assign(new Product(), fields, {
         supplierId,
         categoryId,
       });
+      const lastSeq = await this.products.findLastBlockCodeSeq(category.code);
+      product.assignBlockCode(category.code, lastSeq + 1);
       product.changePrice(new Decimal(price), this.clock.now());
       const saved = await this.products.saveIfSkuAvailable(product, styleIds);
       if (!saved) throw this.skuTaken(fields.sku);
@@ -205,7 +210,7 @@ export class ProductsService {
 
       const { categoryId, price, styleIds, ...patch } = input;
       if (categoryId !== undefined && categoryId !== product.categoryId) {
-        await this.catalog.assertUsableCategory(categoryId, supplierId);
+        await this.catalog.getUsableCategoryForUpdate(categoryId);
         product.moveToCategory(categoryId);
       }
       if (styleIds !== undefined) await this.assertActiveStyles(styleIds);
