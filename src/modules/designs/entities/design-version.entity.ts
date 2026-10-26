@@ -11,6 +11,7 @@ import {
 } from 'typeorm';
 import { BusinessRuleError } from '../../../common/errors/index.js';
 import { sqlIn } from '../../../database/postgres/sql-check.js';
+import { PaymentMilestone } from '../../contracts/entities/payment-milestone.entity.js';
 import { Project } from '../../projects/entities/project.entity.js';
 import { User } from '../../users/entities/user.entity.js';
 
@@ -67,8 +68,7 @@ export type VersionRevisionInfo = Pick<
 /**
  * Mỗi lần designer nộp bản vẽ, mỗi concept AI, mỗi lần lưu chỉnh sửa trên web. Không xóa.
  * `version_no` tăng theo `(project_id, version_type)`; nhãn v1, v1.1… tính lúc hiển thị.
- * File DXF nằm ở `design_assets` (`DRAWING_2D`). `milestone_id`, `source_generation_id` chưa có FK
- * (thêm khi có `payment_milestones`, `ai_generations`).
+ * File DXF nằm ở `design_assets` (`DRAWING_2D`). `source_generation_id` chưa có FK (thêm khi có `ai_generations`).
  */
 @Entity({ name: 'design_versions' })
 @Unique('uq_design_versions_project_id_version_type_version_no', [
@@ -107,9 +107,16 @@ export class DesignVersion {
   })
   project?: Relation<Project>;
 
-  /** Đợt thanh toán của giai đoạn (`payment_milestones`); chưa có FK. */
+  /** Đợt thanh toán của giai đoạn; phải cùng dự án (qua `contracts.project_id`). */
   @Column({ name: 'milestone_id', type: 'uuid', nullable: true })
   milestoneId: string | null;
+
+  @ManyToOne(() => PaymentMilestone, { nullable: true })
+  @JoinColumn({
+    name: 'milestone_id',
+    foreignKeyConstraintName: 'fk_design_versions_milestone_id',
+  })
+  milestone?: Relation<PaymentMilestone> | null;
 
   @Column({ name: 'parent_version_id', type: 'uuid', nullable: true })
   parentVersionId: string | null;

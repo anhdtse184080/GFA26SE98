@@ -14,20 +14,18 @@ import {
 } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/pagination/pagination-query.dto.js';
 import { IsOptionalNotNull } from '../../../common/validation/optional.js';
-import { trim } from '../../../common/validation/transforms.js';
+import {
+  POSITIVE_MONEY_PATTERN,
+  toMoneyString,
+  trim,
+} from '../../../common/validation/transforms.js';
 import {
   PROJECT_STATUSES,
   type ProjectStatus,
 } from '../entities/project.entity.js';
 
-/** Tiền > 0, tối đa 13 chữ số phần nguyên và 2 chữ số thập phân (NUMERIC(15,2)). */
-const POSITIVE_MONEY_PATTERN = /^(?!0+(\.0{1,2})?$)\d{1,13}(\.\d{1,2})?$/;
 const MONEY_MESSAGE =
   'phải > 0, tối đa 13 chữ số phần nguyên và 2 chữ số thập phân';
-
-/** Tiền nhận string (khuyến nghị, giữ chính xác) hoặc number; regex kiểm tra sau. */
-const toMoneyString = ({ value }: { value: unknown }) =>
-  typeof value === 'number' ? String(value) : trim({ value });
 
 export class ListProjectsQueryDto extends PaginationQueryDto {
   @IsOptional()

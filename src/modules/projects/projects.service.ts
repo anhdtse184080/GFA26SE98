@@ -216,6 +216,18 @@ export class ProjectsService {
   }
 
   /**
+   * DRAFT → CONTRACT_PENDING khi Staff tạo hợp đồng. Không kiểm tra quyền (module gọi đã kiểm tra);
+   * gọi trong transaction của module hợp đồng.
+   * @throws NotFoundError `PROJECT_NOT_FOUND`
+   * @throws BusinessRuleError `INVALID_PROJECT_STATUS_TRANSITION`
+   */
+  async markContractPending(id: string): Promise<void> {
+    const project = await this.getProjectOrThrow(id);
+    project.markContractPending();
+    await this.projects.save(project);
+  }
+
+  /**
    * Chuyển giai đoạn dự án theo thiết kế được duyệt (module designs gọi trong transaction của nó):
    * duyệt mặt bằng → PRODUCT_SELECTION, duyệt sản phẩm → QUOTING.
    * @throws NotFoundError `PROJECT_NOT_FOUND`

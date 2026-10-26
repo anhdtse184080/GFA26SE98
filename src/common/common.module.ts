@@ -9,10 +9,12 @@ import {
   GcsFileStorage,
 } from '../infrastructure/gcs-file-storage.js';
 import { createMailer } from '../infrastructure/mail/create-mailer.js';
+import { PdfLibContractRenderer } from '../infrastructure/pdf/pdf-lib-contract-renderer.js';
 import { SystemClock } from '../infrastructure/system-clock.js';
 import { DomainExceptionFilter } from './filters/domain-exception.filter.js';
 import { CAD_FILES } from './ports/cad-files.js';
 import { CLOCK } from './ports/clock.js';
+import { CONTRACT_PDF_RENDERER } from './ports/contract-pdf-renderer.js';
 import { FILE_STORAGE } from './ports/file-storage.js';
 import { MAILER } from './ports/mailer.js';
 import { PASSWORD_HASHER } from './ports/password-hasher.js';
@@ -23,6 +25,7 @@ import { createValidationPipe } from './validation/validation.pipe.js';
   providers: [
     { provide: PASSWORD_HASHER, useFactory: () => new BcryptPasswordHasher() },
     { provide: CLOCK, useClass: SystemClock },
+    { provide: CONTRACT_PDF_RENDERER, useClass: PdfLibContractRenderer },
     {
       provide: MAILER,
       inject: [ConfigService],
@@ -53,6 +56,13 @@ import { createValidationPipe } from './validation/validation.pipe.js';
     { provide: APP_FILTER, useClass: DomainExceptionFilter },
     { provide: APP_PIPE, useFactory: createValidationPipe },
   ],
-  exports: [PASSWORD_HASHER, CLOCK, MAILER, FILE_STORAGE, CAD_FILES],
+  exports: [
+    PASSWORD_HASHER,
+    CLOCK,
+    MAILER,
+    FILE_STORAGE,
+    CAD_FILES,
+    CONTRACT_PDF_RENDERER,
+  ],
 })
 export class CommonModule {}

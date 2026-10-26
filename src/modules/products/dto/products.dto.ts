@@ -16,7 +16,12 @@ import {
 } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/pagination/pagination-query.dto.js';
 import { IsOptionalNotNull } from '../../../common/validation/optional.js';
-import { trim } from '../../../common/validation/transforms.js';
+import {
+  MONEY_PATTERN,
+  POSITIVE_MONEY_PATTERN,
+  toMoneyString,
+  trim,
+} from '../../../common/validation/transforms.js';
 import {
   PRODUCT_STATUSES,
   PRODUCT_UNITS,
@@ -26,10 +31,6 @@ import {
   type StockStatus,
 } from '../entities/product.entity.js';
 
-/** Số tiền ≥ 0, tối đa 13 chữ số phần nguyên và 2 chữ số thập phân (NUMERIC(15,2)). */
-const MONEY_PATTERN = /^\d{1,13}(\.\d{1,2})?$/;
-/** Như `MONEY_PATTERN` nhưng > 0. */
-const POSITIVE_MONEY_PATTERN = /^(?!0+(\.0{1,2})?$)\d{1,13}(\.\d{1,2})?$/;
 const PRICE_MESSAGE =
   'price phải > 0, tối đa 13 chữ số phần nguyên và 2 chữ số thập phân';
 
@@ -38,10 +39,6 @@ const SKU_PATTERN = /^[A-Za-z0-9._-]+$/;
 const SKU_MESSAGE = 'sku chỉ gồm chữ, số và các ký tự . _ -';
 const COLOR_CODE_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const MAX_STYLES_PER_PRODUCT = 20;
-
-/** Tiền nhận string (khuyến nghị, giữ chính xác) hoặc number; regex kiểm tra sau. */
-const toMoneyString = ({ value }: { value: unknown }) =>
-  typeof value === 'number' ? String(value) : trim({ value });
 
 export class ListProductsQueryDto extends PaginationQueryDto {
   /** Tìm theo tên hoặc sku */
